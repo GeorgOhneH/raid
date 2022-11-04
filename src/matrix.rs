@@ -18,15 +18,17 @@ impl<const M: usize, const N: usize> Debug for Matrix<M, N> {
 
 impl<const N: usize> Matrix<N, N> {
     pub fn gaussian_elimination(&mut self, mut vec: [Galois; N]) -> [Galois; N] {
-        let mut swap_history = vec![];
+        println!("STARING {:?}", &vec);
         for m in 0..N {
             // swapp if zero
+            println!("ROUND: {}", m);
+            println!("{:?}", &self);
+            println!("{:?}", &vec);
             if self.data[m][m] == Galois::zero() {
                 for m_below in m+1..N {
                     if self.data[m_below][m] != Galois::zero() {
                         self.data.swap(m, m_below);
                         vec.swap(m, m_below);
-                        swap_history.push((m, m_below));
                         break
                     }
                 }
@@ -42,6 +44,7 @@ impl<const N: usize> Matrix<N, N> {
                 for i in 0..N {
                     self.data[m][i] *= scale;
                 }
+                vec[m] *= scale;
             }
 
             for m_below in m+1..N {
@@ -55,14 +58,13 @@ impl<const N: usize> Matrix<N, N> {
             }
         }
 
+        println!("{:?}", self);
+        println!("{:?}", vec);
+
         for m in (0..N-1).rev() {
             for c in m+1..N {
                 vec[m] -= vec[c] * self.data[m][c]
             }
-        }
-
-        for (x, y) in swap_history.into_iter().rev() {
-            vec.swap(x, y)
         }
 
         vec
@@ -78,17 +80,10 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
     }
 
     pub fn recovery_matrix(&self, mut ds: Vec<usize>, cs: Vec<usize>) -> Matrix<N, N> {
-        assert!(ds.len() + cs.len() <= N);
+        assert_eq!(ds.len() + cs.len(), N);
 
-        let mut x = 0;
-        while ds.len() + cs.len() != N {
-            if !ds.contains(&x) {
-                ds.push(x)
-            }
-            x += 1;
-        }
         let data = core::array::from_fn(|m| {
-            if m < N - cs.len() {
+            if m < ds.len() {
                 core::array::from_fn(|n| {
                     if ds[m] == n {
                         Galois::one()
@@ -108,9 +103,9 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
 
     pub fn mul_vec(&self, vec: &[Galois; N]) -> [Galois; M] {
         let mut result = [Galois::zero(); M];
-        for (mut r, col) in result.iter_mut().zip(&self.data) {
-            for (m, v) in col.iter().zip(vec) {
-                r += m * v;
+        for (mut r, row) in result.iter_mut().zip(&self.data) {
+            for (m, v) in row.iter().zip(vec) {
+                *r += m * v;
             }
         }
         result

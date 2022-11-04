@@ -163,20 +163,19 @@ macro_rules! mul_assign_impl {
     )+)
 }
 
+macro_rules! div_assign_impl {
+    ($($t:ty)+) => ($(
+        impl DivAssign for $t {
+            #[inline]
+            fn div_assign(&mut self, other: $t) { *self = *self / other }
+        }
+
+        forward_ref_op_assign! { impl DivAssign, div_assign for $t, $t }
+    )+)
+}
+
 macro_rules! forward_ref_op_assign {
     (impl $imp:ident, $method:ident for $t:ty, $u:ty) => {
-        impl $imp<$u> for &mut $t {
-            #[inline]
-            fn $method(&mut self, other: $u) {
-                $imp::$method(*self, other);
-            }
-        }
-        impl $imp<&$u> for &mut $t {
-            #[inline]
-            fn $method(&mut self, other: &$u) {
-                $imp::$method(*self, *other);
-            }
-        }
 
         impl $imp<&$u> for $t {
             #[inline]
@@ -190,6 +189,7 @@ macro_rules! forward_ref_op_assign {
 add_assign_impl!(Galois);
 sub_assign_impl!(Galois);
 mul_assign_impl!(Galois);
+div_assign_impl!(Galois);
 
 impl Display for Galois {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -253,7 +253,6 @@ mod tests {
     use alloc::vec;
 
     use super::*;
-    use crate::tests::fill_random;
     use rand;
 
     static BACKBLAZE_LOG_TABLE: [u8; 256] = [
@@ -471,32 +470,6 @@ mod tests {
         assert_eq!(exp(13, 7), 43);
     }
 
-    #[test]
-    fn test_slice_add() {
-        let length_list = [16, 32, 34];
-        for len in length_list.iter() {
-            let mut input = vec![0; *len];
-            fill_random(&mut input);
-            let mut output = vec![0; *len];
-            fill_random(&mut output);
-            let mut expect = vec![0; *len];
-            for i in 0..expect.len() {
-                expect[i] = input[i] ^ output[i];
-            }
-            slice_xor(&input, &mut output);
-            for i in 0..expect.len() {
-                assert_eq!(expect[i], output[i]);
-            }
-            fill_random(&mut output);
-            for i in 0..expect.len() {
-                expect[i] = input[i] ^ output[i];
-            }
-            slice_xor(&input, &mut output);
-            for i in 0..expect.len() {
-                assert_eq!(expect[i], output[i]);
-            }
-        }
-    }
 
     #[test]
     fn test_div_a_is_0() {
