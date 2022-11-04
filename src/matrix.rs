@@ -18,12 +18,8 @@ impl<const M: usize, const N: usize> Debug for Matrix<M, N> {
 
 impl<const N: usize> Matrix<N, N> {
     pub fn gaussian_elimination(&mut self, mut vec: [Galois; N]) -> [Galois; N] {
-        println!("STARING {:?}", &vec);
         for m in 0..N {
             // swapp if zero
-            println!("ROUND: {}", m);
-            println!("{:?}", &self);
-            println!("{:?}", &vec);
             if self.data[m][m] == Galois::zero() {
                 for m_below in m+1..N {
                     if self.data[m_below][m] != Galois::zero() {
@@ -35,7 +31,6 @@ impl<const N: usize> Matrix<N, N> {
             }
 
             if self.data[m][m] == Galois::zero() {
-                println!("{:?}, {}", self, m);
                 panic!("Singular matrix")
             }
 
@@ -58,9 +53,6 @@ impl<const N: usize> Matrix<N, N> {
             }
         }
 
-        println!("{:?}", self);
-        println!("{:?}", vec);
-
         for m in (0..N-1).rev() {
             for c in m+1..N {
                 vec[m] -= vec[c] * self.data[m][c]
@@ -73,7 +65,7 @@ impl<const N: usize> Matrix<N, N> {
 
 impl<const M: usize, const N: usize> Matrix<M, N> {
     pub fn vandermonde() -> Self {
-        let data = core::array::from_fn(|m| core::array::from_fn(|n| Galois::new((n + 1) as u8).exp(m)));
+        let data = core::array::from_fn(|m| core::array::from_fn(|n| Galois::new((n + 1) as u8).pow(m)));
         Self {
             data,
         }
