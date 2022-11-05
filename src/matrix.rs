@@ -1,5 +1,6 @@
 use crate::galois::Galois;
 use std::fmt::{Debug, Formatter};
+use std::ops::{Index, IndexMut};
 
 pub struct Matrix<const M: usize, const N: usize> {
     data: [[Galois; N]; M],
@@ -16,21 +17,36 @@ impl<const M: usize, const N: usize> Debug for Matrix<M, N> {
     }
 }
 
+impl<const M: usize, const N: usize> Index<usize> for Matrix<M, N> {
+    type Output = [Galois; N];
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.data[index]
+    }
+}
+
+impl<const M: usize, const N: usize> IndexMut<usize> for Matrix<M, N> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.data[index]
+    }
+}
+
 impl<const N: usize> Matrix<N, N> {
-    pub fn gaussian_elimination(&mut self, mut vec: [Galois; N]) -> [Galois; N] {
+    pub fn gaussian_elimination<const X: usize>(&mut self, mut vec: [[Galois; X]; N]) -> [[Galois; X]; N] {
         for m in 0..N {
             // swapp if zero
             if self.data[m][m] == Galois::zero() {
-                for m_below in m+1..N {
+                for m_below in m + 1..N {
                     if self.data[m_below][m] != Galois::zero() {
                         self.data.swap(m, m_below);
                         vec.swap(m, m_below);
-                        break
+                        break;
                     }
                 }
             }
 
             if self.data[m][m] == Galois::zero() {
+                println!("{:?}", self);
                 panic!("Singular matrix")
             }
 
@@ -39,23 +55,29 @@ impl<const N: usize> Matrix<N, N> {
                 for i in 0..N {
                     self.data[m][i] *= scale;
                 }
-                vec[m] *= scale;
+                for x_idx in 0..X {
+                    vec[m][x_idx] *= scale;
+                }
             }
 
-            for m_below in m+1..N {
+            for m_below in m + 1..N {
                 if self.data[m_below][m] != Galois::zero() {
                     let scale = self.data[m_below][m];
                     for e in 0..N {
                         self.data[m_below][e] -= scale * self.data[m][e]
                     }
-                    vec[m_below] -= scale * vec[m]
+                    for x_idx in 0..X {
+                        vec[m_below][x_idx] -= scale * vec[m][x_idx]
+                    }
                 }
             }
         }
 
-        for m in (0..N-1).rev() {
-            for c in m+1..N {
-                vec[m] -= vec[c] * self.data[m][c]
+        for m in (0..N - 1).rev() {
+            for c in m + 1..N {
+                for x_idx in 0..X {
+                    vec[m][x_idx] -= vec[c][x_idx] * self.data[m][c]
+                }
             }
         }
 
@@ -71,7 +93,7 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
         }
     }
 
-    pub fn recovery_matrix(&self, mut ds: Vec<usize>, cs: Vec<usize>) -> Matrix<N, N> {
+    pub fn recovery_matrix(&self, ds: Vec<usize>, cs: Vec<usize>) -> Matrix<N, N> {
         assert_eq!(ds.len() + cs.len(), N);
 
         let data = core::array::from_fn(|m| {
@@ -84,7 +106,7 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
                     }
                 })
             } else {
-                self.data[cs[m-ds.len()]].clone()
+                self.data[cs[m - ds.len()]].clone()
             }
         });
 
@@ -93,13 +115,26 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
         }
     }
 
-    pub fn mul_vec(&self, vec: &[Galois; N]) -> [Galois; M] {
-        let mut result = [Galois::zero(); M];
-        for (mut r, row) in result.iter_mut().zip(&self.data) {
+    pub fn mul_vec<const X: usize>(&self, vec: &[[Galois; X]; N]) -> [[Galois; X]; M] {
+        let mut result = [[Galois::zero(); X]; M];
+        for (r, row) in result.iter_mut().zip(&self.data) {
             for (m, v) in row.iter().zip(vec) {
-                *r += m * v;
+                for x_idx in 0..X {
+                    r[x_idx] += m * v[x_idx];
+                }
             }
         }
         result
+    }
+
+    pub fn mul_vec_at<const X: usize>(&self, vec: &[[Galois; X]; N], idx: usize) -> [Galois; X] {
+        let mut r = [Galois::zero(); X];
+        let row = &self.data[idx];
+        for (m, v) in row.iter().zip(vec) {
+            for x_idx in 0..X {
+                r[x_idx] += m * v[x_idx];
+            }
+        }
+        r
     }
 }

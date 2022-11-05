@@ -25,114 +25,20 @@ impl Galois {
     }
 }
 
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct GaloisSlice<const X: usize>([Galois; X]);
-
-impl<const X: usize> GaloisSlice<X> {
-    pub fn new(v: u8) -> Self {
-        Self([Galois(v); X])
-    }
-    pub fn zero() -> Self {
-        Self([Galois(0); X])
-    }
-    pub fn one() -> Self {
-        Self([Galois(1); X])
-    }
-
-    pub fn pow(mut self, n: usize) -> Self {
-        for g in &mut self.0 {
-            *g = g.pow(n)
-        }
-        self
-    }
-
-    pub fn as_bytes(&self) -> &[u8; X] {
-        unsafe { core::mem::transmute(self) }
-    }
-
+pub fn from_bytes<const X: usize>(bytes: [u8; X]) -> [Galois; X] {
+    unsafe { core::mem::transmute_copy(&bytes) }
 }
 
-impl<const X: usize> Add<Self> for &GaloisSlice<X> {
-    type Output = GaloisSlice::<X>;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        let mut r = GaloisSlice::<X>::zero();
-        for i in 0..X {
-            r.0[i] = self.0[i] + rhs.0[i]
-        }
-        r
-    }
+pub fn from_bytes_ref<const X: usize>(bytes: &[u8; X]) -> &[Galois; X] {
+    unsafe { core::mem::transmute(bytes) }
 }
 
-impl<const X: usize> Mul<Self> for &GaloisSlice<X> {
-    type Output = GaloisSlice::<X>;
-
-    fn mul(self, rhs: Self) -> Self::Output {
-        let mut r = GaloisSlice::<X>::zero();
-        for i in 0..X {
-            r.0[i] = self.0[i] * rhs.0[i]
-        }
-        r
-    }
+pub fn as_bytes<const X: usize>(galois_slice: &[Galois; X]) -> &[u8; X] {
+    unsafe { core::mem::transmute(galois_slice) }
 }
 
-impl<const X: usize> Sub<Self> for &GaloisSlice<X> {
-    type Output = GaloisSlice::<X>;
 
-    fn sub(self, rhs: Self) -> Self::Output {
-        let mut r = GaloisSlice::<X>::zero();
-        for i in 0..X {
-            r.0[i] = self.0[i] - rhs.0[i]
-        }
-        r
-    }
-}
-
-impl<const X: usize> Div<Self> for &GaloisSlice<X> {
-    type Output = GaloisSlice::<X>;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        let mut r = GaloisSlice::<X>::zero();
-        for i in 0..X {
-            r.0[i] = self.0[i] / rhs.0[i]
-        }
-        r
-    }
-}
-
-impl<const X: usize> AddAssign<&Self> for GaloisSlice<X> {
-    fn add_assign(&mut self, rhs: &Self) {
-        for i in 0..X {
-            self.0[i] += rhs.0[i]
-        }
-    }
-}
-
-impl<const X: usize> SubAssign<&Self> for GaloisSlice<X> {
-    fn sub_assign(&mut self, rhs: &Self) {
-        for i in 0..X {
-            self.0[i] -= rhs.0[i]
-        }
-    }
-}
-
-impl<const X: usize> MulAssign<&Self> for GaloisSlice<X> {
-    fn mul_assign(&mut self, rhs: &Self) {
-        for i in 0..X {
-            self.0[i] *= rhs.0[i]
-        }
-    }
-}
-
-impl<const X: usize> DivAssign<&Self> for GaloisSlice<X> {
-    fn div_assign(&mut self, rhs: &Self) {
-        for i in 0..X {
-            self.0[i] /= rhs.0[i]
-        }
-    }
-}
 macro_rules! add_impl {
     ($($t:ty)*) => ($(
         impl Add for $t {

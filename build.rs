@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+// https://docs.rs/reed-solomon-erasure/latest/reed_solomon_erasure/
 const FIELD_SIZE: usize = 256;
 
 const GENERATING_POLYNOMIAL: usize = 29;
