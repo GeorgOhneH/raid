@@ -65,7 +65,6 @@ fn gen_mul_table(
     result
 }
 
-
 macro_rules! write_table {
     (1D => $file:ident, $table:ident, $name:expr, $type:expr) => {{
         let len = $table.len();
@@ -115,9 +114,7 @@ fn write_tables() {
     write_table!(1D => f, log_table,      "LOG_TABLE",      "u8");
     write_table!(1D => f, exp_table,      "EXP_TABLE",      "u8");
     write_table!(2D => f, mul_table,      "MUL_TABLE",      "u8");
-
 }
-
 
 fn main() {
     write_tables();

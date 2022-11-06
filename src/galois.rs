@@ -1,7 +1,7 @@
 //! Implementation of GF(2^8): the finite field with 2^8 elements.
 
-use std::ops::{Add, Mul, Sub, Div, AddAssign, SubAssign, MulAssign, DivAssign};
 use std::fmt::{Display, Formatter};
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 include!(concat!(env!("OUT_DIR"), "/table.rs"));
 
 /// The field GF(2^8).
@@ -29,7 +29,6 @@ pub fn from_bytes<const X: usize>(bytes: [u8; X]) -> [Galois; X] {
     unsafe { core::mem::transmute_copy(&bytes) }
 }
 
-
 pub fn from_bytes_ref<const X: usize>(bytes: &[u8; X]) -> &[Galois; X] {
     unsafe { core::mem::transmute(bytes) }
 }
@@ -37,7 +36,6 @@ pub fn from_bytes_ref<const X: usize>(bytes: &[u8; X]) -> &[Galois; X] {
 pub fn as_bytes<const X: usize>(galois_slice: &[Galois; X]) -> &[u8; X] {
     unsafe { core::mem::transmute(galois_slice) }
 }
-
 
 macro_rules! add_impl {
     ($($t:ty)*) => ($(
@@ -52,7 +50,6 @@ macro_rules! add_impl {
     )*)
 }
 
-
 macro_rules! sub_impl {
     ($($t:ty)*) => ($(
         impl Sub for $t {
@@ -65,7 +62,6 @@ macro_rules! sub_impl {
         forward_ref_binop! { impl Sub, sub for $t, $t }
     )*)
 }
-
 
 macro_rules! mul_impl {
     ($($t:ty)*) => ($(
@@ -138,7 +134,7 @@ macro_rules! forward_ref_binop {
                 $imp::$method(*self, *other)
             }
         }
-    }
+    };
 }
 
 add_impl!(Galois);
@@ -192,14 +188,13 @@ macro_rules! div_assign_impl {
 
 macro_rules! forward_ref_op_assign {
     (impl $imp:ident, $method:ident for $t:ty, $u:ty) => {
-
         impl $imp<&$u> for $t {
             #[inline]
             fn $method(&mut self, other: &$u) {
                 $imp::$method(self, *other);
             }
         }
-    }
+    };
 }
 
 add_assign_impl!(Galois);
@@ -212,7 +207,6 @@ impl Display for Galois {
         Display::fmt(&self.0, f)
     }
 }
-
 
 /// Add two elements.
 pub fn add(a: u8, b: u8) -> u8 {

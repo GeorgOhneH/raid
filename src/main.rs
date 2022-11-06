@@ -1,16 +1,15 @@
 #![feature(generic_const_exprs)]
 
-use crate::matrix::Matrix;
 use crate::galois::Galois;
 use crate::head_node::HeadNode;
+use crate::matrix::Matrix;
 use std::path::PathBuf;
 
-use rand::{rngs::StdRng, RngCore, SeedableRng, Rng};
+use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
 pub mod galois;
-pub mod matrix;
 pub mod head_node;
-
+pub mod matrix;
 
 fn main() {
     fuzz_test();
@@ -94,38 +93,28 @@ fn main() {
 }
 
 fn fuzz_test() {
-    /*
-    1,1,1,1,1,1
-    1,2,3,4,5,6
-    1,8,15,64,85,120
-
-    1,1,1,1,1,1
-    0,3,2,5,4,7
-    0,0,0,90,72,108
-    No independent :(
-     */
-    const D: usize = 9;
-    const C: usize = 3;
-    const X: usize = 1024;
+    const D: usize = 4;
+    const C: usize = 6;
+    const X: usize = 128;
     const T: usize = 100;
     let mut rng = rand::thread_rng();
     let mut node = HeadNode::<D, C, X>::new(PathBuf::from("C:\\scripts\\rust\\raid\\fuzz"));
 
-    let data: Vec<_> = (0..T).map(|_| {
-        let mut data = [[0u8;X]; D];
-        for i in 0..D {
-            rng.fill_bytes(&mut data[i])
-        }
-        data
-    }).collect();
+    let data: Vec<_> = (0..T)
+        .map(|_| {
+            let mut data = [[0u8; X]; D];
+            for i in 0..D {
+                rng.fill_bytes(&mut data[i])
+            }
+            data
+        })
+        .collect();
 
     for d in &data {
         node.add_data(unsafe { core::mem::transmute(d) });
     }
 
-    let data_read: Vec<_> = (0..T).map(|i| {
-        node.read_data(i)
-    }).collect();
+    let data_read: Vec<_> = (0..T).map(|i| node.read_data(i)).collect();
 
     assert_eq!(data_read, data);
 
@@ -144,12 +133,7 @@ fn fuzz_test() {
 
         node.construct_missing_devices();
 
-        let data_read: Vec<_> = (0..T).map(|i| {
-            node.read_data(i)
-        }).collect();
+        let data_read: Vec<_> = (0..T).map(|i| node.read_data(i)).collect();
         assert_eq!(data_read, data);
     }
-
-
 }
-

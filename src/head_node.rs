@@ -1,24 +1,30 @@
-use std::path::{Path, PathBuf};
-use std::fs::create_dir;
-use crate::galois::{Galois};
+use crate::galois;
+use crate::galois::Galois;
 use crate::matrix::Matrix;
 use std::fs;
+use std::fs::create_dir;
+use std::path::{Path, PathBuf};
 use std::prelude::rust_2021::TryInto;
-use crate::galois;
 
 pub struct HeadNode<const D: usize, const C: usize, const X: usize>
-    where
-        [(); D + C]:
+where
+    [(); C + D]:,
+    [(); D + C]:,
+    [(); C + C]:,
+    [(); D + D]:,
 {
     root_path: PathBuf,
     data_slices: usize,
-    vandermonde: Matrix::<C, D>,
-    paths: [PathBuf; D + C],
+    vandermonde: Matrix<C, D>,
+    paths: [PathBuf; C + D],
 }
 
 impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
-    where
-        [(); D + C]:
+where
+    [(); C + D]:,
+    [(); D + C]:,
+    [(); C + C]:,
+    [(); D + D]:,
 {
     pub fn new(root_path: PathBuf) -> Self {
         let paths = core::array::from_fn(|i| root_path.join(format!("device{i}")));
@@ -30,7 +36,7 @@ impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
         Self {
             root_path,
             data_slices: 0,
-            vandermonde: Matrix::<C, D>::vandermonde(),
+            vandermonde: Matrix::<C, D>::reed_solomon(),
             paths,
         }
     }
@@ -182,7 +188,7 @@ impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
         for check_idx in 0..C {
             let old_checksum = galois::from_bytes(self.read_checksum_at(data_slice, check_idx));
             let new_checksum: [Galois; X] = core::array::from_fn(|i| {
-                old_checksum[i] + self.vandermonde[check_idx][data_idx]*(data[i]- old_data[i])
+                old_checksum[i] + self.vandermonde[check_idx][data_idx] * (data[i] - old_data[i])
             });
             let file_path = self.checksum_file(data_slice, check_idx);
             fs::remove_file(&file_path).unwrap();

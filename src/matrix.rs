@@ -2,11 +2,19 @@ use crate::galois::Galois;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Index, IndexMut};
 
-pub struct Matrix<const M: usize, const N: usize> {
+pub struct Matrix<const M: usize, const N: usize>
+where
+    [(); M + N]:,
+    [(); N + N]:,
+{
     data: [[Galois; N]; M],
 }
 
-impl<const M: usize, const N: usize> Debug for Matrix<M, N> {
+impl<const M: usize, const N: usize> Debug for Matrix<M, N>
+where
+    [(); M + N]:,
+    [(); N + N]:,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("[\n")?;
         for row in &self.data {
@@ -17,7 +25,11 @@ impl<const M: usize, const N: usize> Debug for Matrix<M, N> {
     }
 }
 
-impl<const M: usize, const N: usize> Index<usize> for Matrix<M, N> {
+impl<const M: usize, const N: usize> Index<usize> for Matrix<M, N>
+where
+    [(); M + N]:,
+    [(); N + N]:,
+{
     type Output = [Galois; N];
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -25,14 +37,24 @@ impl<const M: usize, const N: usize> Index<usize> for Matrix<M, N> {
     }
 }
 
-impl<const M: usize, const N: usize> IndexMut<usize> for Matrix<M, N> {
+impl<const M: usize, const N: usize> IndexMut<usize> for Matrix<M, N>
+where
+    [(); M + N]:,
+    [(); N + N]:,
+{
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.data[index]
     }
 }
 
-impl<const N: usize> Matrix<N, N> {
-    pub fn gaussian_elimination<const X: usize>(&mut self, mut vec: [[Galois; X]; N]) -> [[Galois; X]; N] {
+impl<const N: usize> Matrix<N, N>
+where
+    [(); N + N]:,
+{
+    pub fn gaussian_elimination<const X: usize>(
+        &mut self,
+        mut vec: [[Galois; X]; N],
+    ) -> [[Galois; X]; N] {
         for m in 0..N {
             // swapp if zero
             if self.data[m][m] == Galois::zero() {
@@ -85,12 +107,46 @@ impl<const N: usize> Matrix<N, N> {
     }
 }
 
-impl<const M: usize, const N: usize> Matrix<M, N> {
-    pub fn vandermonde() -> Self {
-        let data = core::array::from_fn(|m| core::array::from_fn(|n| Galois::new((n + 1) as u8).pow(m)));
-        Self {
-            data,
+impl<const M: usize, const N: usize> Matrix<M, N>
+where
+    [(); M + N]:,
+    [(); N + N]:,
+{
+    pub fn reed_solomon() -> Self {
+        let mut vandermonde: [[Galois; N]; M + N] =
+            core::array::from_fn(|m| core::array::from_fn(|n| Galois::new((m) as u8).pow(n)));
+
+        for idx_n in 0..N {
+            if vandermonde[idx_n][idx_n] == Galois::zero() {
+                for below_n in idx_n + 1..N + M {
+                    if vandermonde[below_n][idx_n] != Galois::zero() {
+                        vandermonde.swap(below_n, idx_n)
+                    }
+                }
+            }
+
+            if vandermonde[idx_n][idx_n] == Galois::zero() {
+                panic!("should never be possible with a vandermonde matrix")
+            }
+
+            if vandermonde[idx_n][idx_n] != Galois::one() {
+                let scale = Galois::one() / vandermonde[idx_n][idx_n];
+                for r in 0..N + M {
+                    vandermonde[r][idx_n] *= scale
+                }
+            }
+
+            for c in (0..idx_n).chain(idx_n + 1..N) {
+                let scale = vandermonde[idx_n][c];
+                for r in 0..N + M {
+                    vandermonde[r][c] -= scale * vandermonde[r][idx_n]
+                }
+            }
         }
+
+        let data = core::array::from_fn(|i| vandermonde[i + N]);
+
+        Self { data }
     }
 
     pub fn recovery_matrix(&self, ds: Vec<usize>, cs: Vec<usize>) -> Matrix<N, N> {
@@ -110,9 +166,7 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
             }
         });
 
-        Matrix::<N, N> {
-            data
-        }
+        Matrix::<N, N> { data }
     }
 
     pub fn mul_vec<const X: usize>(&self, vec: &[[Galois; X]; N]) -> [[Galois; X]; M] {
