@@ -6,7 +6,7 @@ use std::fs::create_dir;
 use std::path::{Path, PathBuf};
 use std::prelude::rust_2021::TryInto;
 
-pub struct HeadNode<const D: usize, const C: usize, const X: usize>
+pub struct SingleServer<const D: usize, const C: usize, const X: usize>
 where
     [(); C + D]:,
     [(); D + C]:,
@@ -19,7 +19,7 @@ where
     paths: [PathBuf; C + D],
 }
 
-impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
+impl<const D: usize, const C: usize, const X: usize> SingleServer<D, C, X>
 where
     [(); C + D]:,
     [(); D + C]:,

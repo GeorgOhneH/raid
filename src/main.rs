@@ -1,15 +1,16 @@
 #![feature(generic_const_exprs)]
 
 use crate::galois::Galois;
-use crate::head_node::HeadNode;
+use crate::single::SingleServer;
 use crate::matrix::Matrix;
 use std::path::PathBuf;
 
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
 pub mod galois;
-pub mod head_node;
+pub mod single;
 pub mod matrix;
+pub mod distributed;
 
 fn main() {
     fuzz_test();
@@ -18,7 +19,7 @@ fn main() {
     let mut data2 = [[6u8, 7], [8, 9], [10, 11]];
     let galois_slice1 = unsafe { core::mem::transmute(data1) };
     let galois_slice2 = unsafe { core::mem::transmute(data2) };
-    let mut head_node = HeadNode::<3, 2, 2>::new(path);
+    let mut head_node = SingleServer::<3, 2, 2>::new(path);
     let data_slice1 = head_node.add_data(&galois_slice1);
     let data_slice2 = head_node.add_data(&galois_slice2);
 
@@ -98,9 +99,9 @@ fn fuzz_test() {
     const X: usize = 128;
     const T: usize = 100;
     let mut rng = rand::thread_rng();
-    let mut node = HeadNode::<D, C, X>::new(PathBuf::from("C:\\scripts\\rust\\raid\\fuzz"));
+    let mut node = SingleServer::<D, C, X>::new(PathBuf::from("C:\\scripts\\rust\\raid\\fuzz"));
 
-    let data: Vec<_> = (0..T)
+    let mut data: Vec<_> = (0..T)
         .map(|_| {
             let mut data = [[0u8; X]; D];
             for i in 0..D {
@@ -135,5 +136,16 @@ fn fuzz_test() {
 
         let data_read: Vec<_> = (0..T).map(|i| node.read_data(i)).collect();
         assert_eq!(data_read, data);
+
+        let mut changed_data = [0u8; X];
+        rng.fill_bytes(&mut changed_data);
+        let data_slice = rng.gen_range(0..T);
+        let data_idx = rng.gen_range(0..D);
+        data[data_slice][data_idx] = changed_data;
+        node.update_data(galois::from_bytes_ref(&changed_data).clone(), data_slice, data_idx);
+
+        let data_read: Vec<_> = (0..T).map(|i| node.read_data(i)).collect();
+        assert_eq!(data_read, data);
+
     }
 }

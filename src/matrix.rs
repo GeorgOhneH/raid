@@ -2,6 +2,9 @@ use crate::galois::Galois;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Index, IndexMut};
 
+// http://web.eecs.utk.edu/~jplank/plank/papers/CS-96-332.pdf
+// http://web.eecs.utk.edu/~jplank/plank/papers/CS-03-504.pdf
+
 pub struct Matrix<const M: usize, const N: usize>
 where
     [(); M + N]:,
