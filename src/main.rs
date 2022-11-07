@@ -6,13 +6,55 @@ use crate::matrix::Matrix;
 use std::path::PathBuf;
 
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
+use crate::distributed::HeadNode;
 
 pub mod galois;
 pub mod single;
 pub mod matrix;
 pub mod distributed;
 
+
 fn main() {
+    test_distributed();
+}
+
+
+fn test_distributed() {
+    let path = PathBuf::from("C:\\scripts\\rust\\raid\\distributed");
+    let mut data1 = [[0u8, 1], [2, 3], [4, 5]];
+    let mut data2 = [[6u8, 7], [8, 9], [10, 11]];
+    let galois_slice1 = unsafe { core::mem::transmute(data1) };
+    let galois_slice2 = unsafe { core::mem::transmute(data2) };
+
+    let mut head_node = HeadNode::<3, 2, 2>::new(path);
+
+    let data_slice1 = head_node.add_data(&galois_slice1);
+    assert_eq!(data1, head_node.read_data(data_slice1));
+    let data_slice2 = head_node.add_data(&galois_slice2);
+
+    assert_eq!(data1, head_node.read_data(data_slice1));
+    assert_eq!(data2, head_node.read_data(data_slice2));
+
+    head_node.destroy_device(0);
+    head_node.destroy_device(1);
+
+    assert_eq!(data1, head_node.read_data(data_slice1));
+    assert_eq!(data2, head_node.read_data(data_slice2));
+
+    head_node.destroy_device(2);
+    head_node.destroy_device(3);
+
+    assert_eq!(data1, head_node.read_data(data_slice1));
+    assert_eq!(data2, head_node.read_data(data_slice2));
+
+    head_node.destroy_device(4);
+    head_node.destroy_device(0);
+
+    assert_eq!(data1, head_node.read_data(data_slice1));
+    assert_eq!(data2, head_node.read_data(data_slice2));
+}
+
+fn test_single() {
     fuzz_test();
     let path = PathBuf::from("C:\\scripts\\rust\\raid\\disks");
     let mut data1 = [[0u8, 1], [2, 3], [4, 5]];

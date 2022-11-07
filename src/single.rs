@@ -49,14 +49,14 @@ where
         format!("{}_{}d.bin", data_slice, data_idx)
     }
 
+    fn checksum_name(data_slice: usize, check_idx: usize) -> String {
+        format!("{}_{}c.bin", data_slice, check_idx)
+    }
+
     fn data_file(&self, data_slice: usize, data_idx: usize) -> PathBuf {
         let folder_path = &self.paths[Self::folder_id(data_slice, data_idx)];
         let name = Self::data_name(data_slice, data_idx);
         folder_path.join(name)
-    }
-
-    fn checksum_name(data_slice: usize, check_idx: usize) -> String {
-        format!("{}_{}c.bin", data_slice, check_idx)
     }
 
     fn checksum_file(&self, data_slice: usize, check_idx: usize) -> PathBuf {
@@ -70,12 +70,12 @@ where
 
         for d_idx in 0..D {
             let file_path = self.data_file(self.data_slices, d_idx);
-            fs::write(file_path, galois::as_bytes(&data[d_idx])).unwrap();
+            fs::write(file_path, galois::as_bytes_ref(&data[d_idx])).unwrap();
         }
 
         for c_idx in 0..C {
             let file_path = self.checksum_file(self.data_slices, c_idx);
-            fs::write(file_path, galois::as_bytes(&checksum[c_idx])).unwrap();
+            fs::write(file_path, galois::as_bytes_ref(&checksum[c_idx])).unwrap();
         }
 
         self.data_slices += 1;
@@ -165,7 +165,7 @@ where
                 let folder_id_i = Self::folder_id(data_slice, data_idx);
                 if !online_devices[folder_id_i] {
                     let file_path = self.data_file(data_slice, data_idx);
-                    fs::write(file_path, galois::as_bytes(&data[data_idx])).unwrap();
+                    fs::write(file_path, galois::as_bytes_ref(&data[data_idx])).unwrap();
                 }
             }
             for check_idx in 0..C {
@@ -173,7 +173,7 @@ where
                 if !online_devices[folder_id_i] {
                     let file_path = self.checksum_file(data_slice, check_idx);
                     let checksum = self.vandermonde.mul_vec_at(&data, check_idx);
-                    fs::write(file_path, galois::as_bytes(&checksum)).unwrap();
+                    fs::write(file_path, galois::as_bytes_ref(&checksum)).unwrap();
                 }
             }
         }
@@ -183,7 +183,7 @@ where
         let old_data = galois::from_bytes(self.read_data_at(data_slice, data_idx));
         let dfile_path = self.data_file(data_slice, data_idx);
         fs::remove_file(&dfile_path).unwrap();
-        fs::write(&dfile_path, galois::as_bytes(&data)).unwrap();
+        fs::write(&dfile_path, galois::as_bytes_ref(&data)).unwrap();
 
         for check_idx in 0..C {
             let old_checksum = galois::from_bytes(self.read_checksum_at(data_slice, check_idx));
@@ -192,7 +192,7 @@ where
             });
             let file_path = self.checksum_file(data_slice, check_idx);
             fs::remove_file(&file_path).unwrap();
-            fs::write(&file_path, galois::as_bytes(&new_checksum)).unwrap();
+            fs::write(&file_path, galois::as_bytes_ref(&new_checksum)).unwrap();
         }
     }
 }

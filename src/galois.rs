@@ -33,7 +33,11 @@ pub fn from_bytes_ref<const X: usize>(bytes: &[u8; X]) -> &[Galois; X] {
     unsafe { core::mem::transmute(bytes) }
 }
 
-pub fn as_bytes<const X: usize>(galois_slice: &[Galois; X]) -> &[u8; X] {
+pub fn as_bytes<const X: usize>(galois_slice: [Galois; X]) -> [u8; X] {
+    unsafe { core::mem::transmute_copy(&galois_slice) }
+}
+
+pub fn as_bytes_ref<const X: usize>(galois_slice: &[Galois; X]) -> &[u8; X] {
     unsafe { core::mem::transmute(galois_slice) }
 }
 
