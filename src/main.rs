@@ -7,14 +7,17 @@ use std::path::PathBuf;
 
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use crate::distributed::HeadNode;
+use crate::raid::RAID;
 
 pub mod galois;
 pub mod single;
 pub mod matrix;
 pub mod distributed;
+pub mod raid;
 
 
 fn main() {
+    fuzz_test::<HeadNode<4, 6, 128>, 4, 6, 128>(100);
     test_distributed();
 }
 
@@ -35,27 +38,23 @@ fn test_distributed() {
     assert_eq!(data1, head_node.read_data(data_slice1));
     assert_eq!(data2, head_node.read_data(data_slice2));
 
-    head_node.destroy_device(0);
-    head_node.destroy_device(1);
+    head_node.destroy_devices(&[0, 1]);
 
     assert_eq!(data1, head_node.read_data(data_slice1));
     assert_eq!(data2, head_node.read_data(data_slice2));
 
-    head_node.destroy_device(2);
-    head_node.destroy_device(3);
+    head_node.destroy_devices(&[2, 3]);
 
     assert_eq!(data1, head_node.read_data(data_slice1));
     assert_eq!(data2, head_node.read_data(data_slice2));
 
-    head_node.destroy_device(4);
-    head_node.destroy_device(0);
+    head_node.destroy_devices(&[4, 0]);
 
     assert_eq!(data1, head_node.read_data(data_slice1));
     assert_eq!(data2, head_node.read_data(data_slice2));
 }
 
 fn test_single() {
-    fuzz_test();
     let path = PathBuf::from("C:\\scripts\\rust\\raid\\disks");
     let mut data1 = [[0u8, 1], [2, 3], [4, 5]];
     let mut data2 = [[6u8, 7], [8, 9], [10, 11]];
@@ -91,9 +90,9 @@ fn test_single() {
     assert_eq!(data2, head_node.read_data(data_slice2));
 
     data1[0] = [9, 9];
-    head_node.update_data([Galois::new(9), Galois::new(9)], data_slice1, 0);
+    head_node.update_data(&[9, 9], data_slice1, 0);
     data2[2] = [11, 99];
-    head_node.update_data([Galois::new(11), Galois::new(99)], data_slice2, 2);
+    head_node.update_data(&[11, 99], data_slice2, 2);
 
     assert_eq!(data1, head_node.read_data(data_slice1));
     assert_eq!(data2, head_node.read_data(data_slice2));
@@ -135,15 +134,11 @@ fn test_single() {
      */
 }
 
-fn fuzz_test() {
-    const D: usize = 4;
-    const C: usize = 6;
-    const X: usize = 128;
-    const T: usize = 100;
+fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(num_data_slices: usize) {
     let mut rng = rand::thread_rng();
-    let mut node = SingleServer::<D, C, X>::new(PathBuf::from("C:\\scripts\\rust\\raid\\fuzz"));
+    let mut node: R = RAID::new(PathBuf::from("C:\\scripts\\rust\\raid\\fuzz"));
 
-    let mut data: Vec<_> = (0..T)
+    let mut data: Vec<_> = (0..num_data_slices)
         .map(|_| {
             let mut data = [[0u8; X]; D];
             for i in 0..D {
@@ -153,15 +148,12 @@ fn fuzz_test() {
         })
         .collect();
 
-    for d in &data {
-        node.add_data(unsafe { core::mem::transmute(d) });
-    }
+    for i in 0..num_data_slices {
+        node.add_data(unsafe { core::mem::transmute(&data[i]) });
 
-    let data_read: Vec<_> = (0..T).map(|i| node.read_data(i)).collect();
+        let data_read: Vec<_> = (0..i+1).map(|i| node.read_data(i)).collect();
+        assert_eq!(data_read, data[..i+1]);
 
-    assert_eq!(data_read, data);
-
-    for _ in 0..100 {
         let number_of_failures: usize = rng.gen_range(0..C);
         let mut failures = vec![];
         while failures.len() < number_of_failures {
@@ -170,24 +162,21 @@ fn fuzz_test() {
                 failures.push(failure)
             }
         }
-        for failure in failures {
-            node.remove_device(failure)
-        }
 
-        node.construct_missing_devices();
+        node.destroy_devices(&failures);
 
-        let data_read: Vec<_> = (0..T).map(|i| node.read_data(i)).collect();
-        assert_eq!(data_read, data);
+        let data_read: Vec<_> = (0..i+1).map(|i| node.read_data(i)).collect();
+        assert_eq!(data_read, data[..i+1]);
 
         let mut changed_data = [0u8; X];
         rng.fill_bytes(&mut changed_data);
-        let data_slice = rng.gen_range(0..T);
+        let data_slice = rng.gen_range(0..i+1);
         let data_idx = rng.gen_range(0..D);
         data[data_slice][data_idx] = changed_data;
-        node.update_data(galois::from_bytes_ref(&changed_data).clone(), data_slice, data_idx);
+        node.update_data(&changed_data, data_slice, data_idx);
 
-        let data_read: Vec<_> = (0..T).map(|i| node.read_data(i)).collect();
-        assert_eq!(data_read, data);
+        let data_read: Vec<_> = (0..i+1).map(|i| node.read_data(i)).collect();
+        assert_eq!(data_read, data[..i+1]);
 
     }
 }

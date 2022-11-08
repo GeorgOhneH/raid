@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::galois;
 use crate::galois::Galois;
+use crate::raid::RAID;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use std::convert::TryInto;
 use std::fs;
@@ -27,6 +28,15 @@ pub enum Msg<const X: usize> {
     NewDataChecksum {
         data_slice: usize,
         data: [Galois; X],
+        dev_idx: usize,
+    },
+    UpdateData {
+        data_slice: usize,
+        data: [Galois; X],
+    },
+    UpdateDataChecksum {
+        data_slice: usize,
+        diff: [Galois; X],
         dev_idx: usize,
     },
     NeedRecover {
@@ -153,11 +163,9 @@ where
 
     pub fn start(mut self, rec: Receiver<Msg<X>>, recover_rec: Receiver<RecoverMsg<X>>) {
         while let Ok(msg) = rec.recv() {
-            println!("thread{}: {:?}", self.dev_idx, &msg);
+            //println!("thread{}: {:?}", self.dev_idx, &msg);
             match msg {
                 Msg::NewData { data_slice, data } => {
-                    self.data_slices = self.data_slices.max(data_slice);
-                    self.write_data(data_slice, &data);
                     for check_idx in 0..C {
                         let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev]
@@ -168,6 +176,23 @@ where
                             })
                             .unwrap()
                     }
+                    self.data_slices = self.data_slices.max(data_slice);
+                    self.write_data(data_slice, &data);
+                }
+                Msg::UpdateData { data_slice, data } => {
+                    let old_data = self.read_data(data_slice);
+                    let diff_data = core::array::from_fn(|i| data[i] - old_data[i]);
+                    for check_idx in 0..C {
+                        let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
+                        self.coms[check_dev]
+                            .send(Msg::UpdateDataChecksum {
+                                data_slice,
+                                diff: diff_data.clone(),
+                                dev_idx: self.dev_idx,
+                            })
+                            .unwrap()
+                    }
+                    self.write_data(data_slice, &data);
                 }
                 Msg::NewDataChecksum {
                     data_slice,
@@ -185,6 +210,19 @@ where
                     let new_checksum = core::array::from_fn(|i| {
                         current_checksum[i]
                             + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
+                    });
+                    self.write_checksum(data_slice, &new_checksum);
+                }
+                Msg::UpdateDataChecksum {
+                    data_slice,
+                    diff,
+                    dev_idx,
+                } => {
+                    let data_idx = Self::data_check_idx(dev_idx, data_slice);
+                    let current_checksum = self.read_checksum(data_slice);
+                    let new_checksum = core::array::from_fn(|i| {
+                        current_checksum[i]
+                            + self.vandermonde[self.check_idx(data_slice)][data_idx] * diff[i]
                     });
                     self.write_checksum(data_slice, &new_checksum);
                 }
@@ -225,8 +263,7 @@ where
     }
 
     pub fn recover(&self, recover_rec: &Receiver<RecoverMsg<X>>) {
-        println!("thread{} RECOVER: {}", self.dev_idx, self.data_slices);
-        for current_data_slice in 0..self.data_slices+1 {
+        for current_data_slice in 0..self.data_slices + 1 {
             while !recover_rec.is_empty() {
                 recover_rec.recv().unwrap();
             }
@@ -245,7 +282,7 @@ where
             let mut r_data_idx = vec![];
             let mut r_check_idx = vec![];
             while let Ok(msg) = recover_rec.recv() {
-                println!("thread{}: msg {:?}", self.dev_idx, &msg);
+                //println!("thread{}: msg {:?}", self.dev_idx, &msg);
                 match msg {
                     RecoverMsg::RequestedData {
                         data_slice,
@@ -253,7 +290,7 @@ where
                         dev_idx,
                     } => {
                         if data_slice != current_data_slice {
-                            continue
+                            continue;
                         }
                         let data_check_idx = Self::data_check_idx(dev_idx, data_slice);
                         if data_check_idx < D {
@@ -264,23 +301,21 @@ where
                             r_check_idx.push(data_check_idx - D)
                         }
                         if r_data_idx.len() + r_check_idx.len() == D {
-                            break
+                            break;
                         }
                     }
                 }
             }
 
             r_data.append(&mut r_check);
-            let mut rec_matrix =
-                self.vandermonde.recovery_matrix(r_data_idx, r_check_idx);
-            let rec_data =
-                rec_matrix.gaussian_elimination(r_data.try_into().unwrap());
+            let mut rec_matrix = self.vandermonde.recovery_matrix(r_data_idx, r_check_idx);
+            let rec_data = rec_matrix.gaussian_elimination(r_data.try_into().unwrap());
 
             let data_check_idx = Self::data_check_idx(self.dev_idx, current_data_slice);
             if data_check_idx < D {
                 self.write_data(current_data_slice, &rec_data[data_check_idx])
             } else {
-                let checksum = self.vandermonde.mul_vec_at(&rec_data, data_check_idx-D);
+                let checksum = self.vandermonde.mul_vec_at(&rec_data, data_check_idx - D);
                 self.write_checksum(current_data_slice, &checksum);
             }
         }
@@ -307,7 +342,19 @@ where
     [(); C + C]:,
     [(); D + D]:,
 {
-    pub fn new(root_path: PathBuf) -> Self {
+    fn dev_idx(data_slice: usize, data_idx: usize) -> usize {
+        (data_idx + data_slice) % (D + C)
+    }
+}
+
+impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for HeadNode<D, C, X>
+where
+    [(); C + D]:,
+    [(); D + C]:,
+    [(); C + C]:,
+    [(); D + D]:,
+{
+    fn new(root_path: PathBuf) -> Self {
         let paths: [PathBuf; D + C] =
             core::array::from_fn(|i| root_path.join(format!("device{i}")));
         for path in &paths {
@@ -335,10 +382,13 @@ where
             let r = channels[i].1.clone();
             let rec_r = recover_channels[i].1.clone();
             let h_send_clone = h_send.clone();
-            std::thread::Builder::new().name(format!("thread{i}")).spawn(move || {
-                let node = Node::new(path, i, v, c, rec_c, h_send_clone);
-                node.start(r, rec_r)
-            }).unwrap()
+            std::thread::Builder::new()
+                .name(format!("thread{i}"))
+                .spawn(move || {
+                    let node = Node::new(path, i, v, c, rec_c, h_send_clone);
+                    node.start(r, rec_r)
+                })
+                .unwrap()
         });
 
         Self {
@@ -349,11 +399,8 @@ where
         }
     }
 
-    fn dev_idx(data_slice: usize, data_idx: usize) -> usize {
-        (data_idx + data_slice) % (D + C)
-    }
-
-    pub fn add_data(&mut self, data: &[[Galois; X]; D]) -> usize {
+    fn add_data(&mut self, data: &[[u8; X]; D]) -> usize {
+        let data: &[[Galois; X]; D] = unsafe { core::mem::transmute(data) };
         for data_idx in 0..D {
             let dev_idx = Self::dev_idx(self.data_slices, data_idx);
             self.coms[dev_idx]
@@ -368,7 +415,7 @@ where
         self.data_slices - 1
     }
 
-    pub fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
+    fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
         for data_idx in 0..D {
             let dev_idx = Self::dev_idx(data_slice, data_idx);
             self.coms[dev_idx]
@@ -393,7 +440,17 @@ where
         result
     }
 
-    pub fn destroy_device(&self, dev_idx: usize) {
-        self.coms[dev_idx].send(Msg::DestroyStorage).unwrap()
+    fn destroy_devices(&self, dev_idxs: &[usize]) {
+        for dev_idx in dev_idxs {
+            self.coms[*dev_idx].send(Msg::DestroyStorage).unwrap()
+        }
+    }
+
+    fn update_data(&self, data: &[u8; X], data_slice: usize, data_idx: usize) {
+        let data = galois::from_bytes_ref(data).clone();
+        let dev_idx = Self::dev_idx(data_slice, data_idx);
+        self.coms[dev_idx]
+            .send(Msg::UpdateData { data_slice, data })
+            .unwrap()
     }
 }

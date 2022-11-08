@@ -1,6 +1,7 @@
 use crate::galois;
 use crate::galois::Galois;
 use crate::matrix::Matrix;
+use crate::raid::RAID;
 use std::fs;
 use std::fs::create_dir;
 use std::path::{Path, PathBuf};
@@ -26,21 +27,6 @@ where
     [(); C + C]:,
     [(); D + D]:,
 {
-    pub fn new(root_path: PathBuf) -> Self {
-        let paths = core::array::from_fn(|i| root_path.join(format!("device{i}")));
-        for path in &paths {
-            let _ = std::fs::remove_dir_all(path);
-            create_dir(path).unwrap()
-        }
-
-        Self {
-            root_path,
-            data_slices: 0,
-            vandermonde: Matrix::<C, D>::reed_solomon(),
-            paths,
-        }
-    }
-
     fn folder_id(data_slice: usize, data_idx: usize) -> usize {
         (data_idx + data_slice) % (D + C)
     }
@@ -65,31 +51,9 @@ where
         folder_path.join(name)
     }
 
-    pub fn add_data(&mut self, data: &[[Galois; X]; D]) -> usize {
-        let checksum = self.vandermonde.mul_vec(data);
-
-        for d_idx in 0..D {
-            let file_path = self.data_file(self.data_slices, d_idx);
-            fs::write(file_path, galois::as_bytes_ref(&data[d_idx])).unwrap();
-        }
-
-        for c_idx in 0..C {
-            let file_path = self.checksum_file(self.data_slices, c_idx);
-            fs::write(file_path, galois::as_bytes_ref(&checksum[c_idx])).unwrap();
-        }
-
-        self.data_slices += 1;
-
-        self.data_slices - 1
-    }
-
     pub fn read_data_at(&self, data_slice: usize, data_idx: usize) -> [u8; X] {
         let file_path = self.data_file(data_slice, data_idx);
         fs::read(file_path).unwrap().try_into().unwrap()
-    }
-
-    pub fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
-        core::array::from_fn(|i| self.read_data_at(data_slice, i))
     }
 
     pub fn read_checksum_at(&self, data_slice: usize, check_idx: usize) -> [u8; X] {
@@ -178,8 +142,63 @@ where
             }
         }
     }
+}
 
-    pub fn update_data(&self, data: [Galois; X], data_slice: usize, data_idx: usize) {
+impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for SingleServer<D, C, X>
+where
+    [(); C + D]:,
+    [(); D + C]:,
+    [(); C + C]:,
+    [(); D + D]:,
+{
+    fn new(root_path: PathBuf) -> Self {
+        let paths = core::array::from_fn(|i| root_path.join(format!("device{i}")));
+        for path in &paths {
+            let _ = std::fs::remove_dir_all(path);
+            create_dir(path).unwrap()
+        }
+
+        Self {
+            root_path,
+            data_slices: 0,
+            vandermonde: Matrix::<C, D>::reed_solomon(),
+            paths,
+        }
+    }
+
+    fn add_data(&mut self, data: &[[u8; X]; D]) -> usize {
+        let data: &[[Galois; X]; D] = unsafe { core::mem::transmute(data) };
+        let checksum = self.vandermonde.mul_vec(data);
+
+        for d_idx in 0..D {
+            let file_path = self.data_file(self.data_slices, d_idx);
+            fs::write(file_path, galois::as_bytes_ref(&data[d_idx])).unwrap();
+        }
+
+        for c_idx in 0..C {
+            let file_path = self.checksum_file(self.data_slices, c_idx);
+            fs::write(file_path, galois::as_bytes_ref(&checksum[c_idx])).unwrap();
+        }
+
+        self.data_slices += 1;
+
+        self.data_slices - 1
+    }
+
+    fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
+        core::array::from_fn(|i| self.read_data_at(data_slice, i))
+    }
+
+    fn destroy_devices(&self, dev_idxs: &[usize]) {
+        for dev_idx in dev_idxs {
+            let device_path = &self.paths[*dev_idx];
+            let _ = std::fs::remove_dir_all(device_path);
+        }
+        self.construct_missing_devices()
+    }
+
+    fn update_data(&self, data: &[u8; X], data_slice: usize, data_idx: usize) {
+        let data = galois::from_bytes_ref(data);
         let old_data = galois::from_bytes(self.read_data_at(data_slice, data_idx));
         let dfile_path = self.data_file(data_slice, data_idx);
         fs::remove_file(&dfile_path).unwrap();
