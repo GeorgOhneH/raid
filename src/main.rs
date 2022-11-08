@@ -1,26 +1,36 @@
 #![feature(generic_const_exprs)]
+#![feature(slice_as_chunks)]
+#![feature(array_chunks)]
 
 use crate::galois::Galois;
-use crate::single::SingleServer;
 use crate::matrix::Matrix;
+use crate::single::SingleServer;
 use std::path::PathBuf;
 
-use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use crate::distributed::HeadNode;
+use crate::file::FileHandler;
 use crate::raid::RAID;
+use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
-pub mod galois;
-pub mod single;
-pub mod matrix;
 pub mod distributed;
+pub mod file;
+pub mod galois;
+pub mod matrix;
 pub mod raid;
-
+pub mod single;
 
 fn main() {
-    fuzz_test::<HeadNode<4, 6, 128>, 4, 6, 128>(100);
+    let path = PathBuf::from("C:\\scripts\\rust\\raid\\file");
+    let mut file_handler = FileHandler::<SingleServer<3, 2, 2>, 3, 2, 2>::new(path);
+    let data = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    file_handler.add_file(String::from("hello"), &data);
+
+    let read_data = file_handler.read_file(&String::from("hello"));
+    assert_eq!(&data, &read_data);
+
+    fuzz_test::<HeadNode<4, 6, 4>, 4, 6, 4>(100);
     test_distributed();
 }
-
 
 fn test_distributed() {
     let path = PathBuf::from("C:\\scripts\\rust\\raid\\distributed");
@@ -134,7 +144,9 @@ fn test_single() {
      */
 }
 
-fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(num_data_slices: usize) {
+fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
+    num_data_slices: usize,
+) {
     let mut rng = rand::thread_rng();
     let mut node: R = RAID::new(PathBuf::from("C:\\scripts\\rust\\raid\\fuzz"));
 
@@ -151,8 +163,8 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(n
     for i in 0..num_data_slices {
         node.add_data(unsafe { core::mem::transmute(&data[i]) });
 
-        let data_read: Vec<_> = (0..i+1).map(|i| node.read_data(i)).collect();
-        assert_eq!(data_read, data[..i+1]);
+        let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
+        assert_eq!(data_read, data[..i + 1]);
 
         let number_of_failures: usize = rng.gen_range(0..C);
         let mut failures = vec![];
@@ -165,18 +177,17 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(n
 
         node.destroy_devices(&failures);
 
-        let data_read: Vec<_> = (0..i+1).map(|i| node.read_data(i)).collect();
-        assert_eq!(data_read, data[..i+1]);
+        let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
+        assert_eq!(data_read, data[..i + 1]);
 
         let mut changed_data = [0u8; X];
         rng.fill_bytes(&mut changed_data);
-        let data_slice = rng.gen_range(0..i+1);
+        let data_slice = rng.gen_range(0..i + 1);
         let data_idx = rng.gen_range(0..D);
         data[data_slice][data_idx] = changed_data;
         node.update_data(&changed_data, data_slice, data_idx);
 
-        let data_read: Vec<_> = (0..i+1).map(|i| node.read_data(i)).collect();
-        assert_eq!(data_read, data[..i+1]);
-
+        let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
+        assert_eq!(data_read, data[..i + 1]);
     }
 }

@@ -9,14 +9,13 @@ use std::convert::TryInto;
 use std::fs;
 use std::fs::create_dir;
 use std::thread::JoinHandle;
+use std::collections::HashMap;
 
 #[derive(Debug)]
-pub enum HeadNodeMsg<const X: usize> {
-    Data {
+pub struct  HeadNodeMsg<const X: usize> {
         data_slice: usize,
         data: [Galois; X],
         data_idx: usize,
-    },
 }
 
 #[derive(Debug)]
@@ -45,6 +44,7 @@ pub enum Msg<const X: usize> {
     },
     HeadNodeDataRequest {
         data_slice: usize,
+        oneshot_send: oneshot::Sender<HeadNodeMsg<X>>
     },
     DestroyStorage,
 }
@@ -56,6 +56,11 @@ pub enum RecoverMsg<const X: usize> {
         data: [Galois; X],
         dev_idx: usize,
     },
+}
+
+struct CurrentChecksumStatus<const X: usize> {
+    count: usize,
+    current_checksum: [Galois; X]
 }
 
 pub struct Node<const D: usize, const C: usize, const X: usize>
@@ -71,7 +76,7 @@ where
     coms: [Sender<Msg<X>>; D + C],
     recover_coms: [Sender<RecoverMsg<X>>; D + C],
     data_slices: usize,
-    head_node: Sender<HeadNodeMsg<X>>,
+    current_checksum: HashMap<usize, CurrentChecksumStatus<X>>
 }
 
 impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
@@ -87,7 +92,6 @@ where
         vandermonde: Matrix<C, D>,
         coms: [Sender<Msg<X>>; D + C],
         recover_coms: [Sender<RecoverMsg<X>>; D + C],
-        head_node: Sender<HeadNodeMsg<X>>,
     ) -> Self {
         let _ = std::fs::remove_dir_all(&path);
         create_dir(&path).unwrap();
@@ -97,8 +101,8 @@ where
             vandermonde,
             coms,
             recover_coms,
-            head_node,
             data_slices: 0,
+            current_checksum: HashMap::new()
         }
     }
 
@@ -201,17 +205,35 @@ where
                 } => {
                     self.data_slices = self.data_slices.max(data_slice);
                     let data_idx = Self::data_check_idx(dev_idx, data_slice);
-                    let file_path = self.checksum_file(data_slice);
-                    let current_checksum = if file_path.exists() {
-                        self.read_checksum(data_slice)
+
+                    let current_status = self.current_checksum.get(&data_slice);
+
+                    let zero = [Galois::zero(); X];
+                    let current_checksum = if let Some(status) = current_status {
+                        &status.current_checksum
                     } else {
-                        [Galois::zero(); X]
+                        &zero
                     };
                     let new_checksum = core::array::from_fn(|i| {
                         current_checksum[i]
                             + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
                     });
-                    self.write_checksum(data_slice, &new_checksum);
+                    if let Some(status) = current_status {
+                        if status.count + 1 == D {
+                            self.current_checksum.remove(&data_slice);
+                            self.write_checksum(data_slice, &new_checksum);
+                        } else {
+                            let mut status = self.current_checksum.get_mut(&data_slice).unwrap();
+                            status.count += 1;
+                            status.current_checksum = new_checksum;
+                        }
+                    } else {
+                        let status = CurrentChecksumStatus {
+                            count: 1,
+                            current_checksum: new_checksum,
+                        };
+                        self.current_checksum.insert(data_slice, status);
+                    };
                 }
                 Msg::UpdateDataChecksum {
                     data_slice,
@@ -248,10 +270,10 @@ where
                         })
                         .unwrap();
                 }
-                Msg::HeadNodeDataRequest { data_slice } => {
+                Msg::HeadNodeDataRequest { data_slice, oneshot_send: oneshot_rec, } => {
                     let data = self.read_data(data_slice);
-                    self.head_node
-                        .send(HeadNodeMsg::Data {
+                    oneshot_rec
+                        .send(HeadNodeMsg {
                             data_slice,
                             data,
                             data_idx: self.data_idx(data_slice),
@@ -332,7 +354,6 @@ where
     data_slices: usize,
     handles: [JoinHandle<()>; D + C],
     coms: [Sender<Msg<X>>; D + C],
-    receiver: Receiver<HeadNodeMsg<X>>,
 }
 
 impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
@@ -367,8 +388,6 @@ where
         let recover_channels: [(Sender<RecoverMsg<X>>, Receiver<RecoverMsg<X>>); D + C] =
             core::array::from_fn(|_| unbounded());
 
-        let (h_send, h_rec) = unbounded();
-
         let coms = core::array::from_fn(|i| channels[i].0.clone());
         let recover_coms = core::array::from_fn(|i| recover_channels[i].0.clone());
 
@@ -381,11 +400,10 @@ where
             let rec_c = recover_coms.clone();
             let r = channels[i].1.clone();
             let rec_r = recover_channels[i].1.clone();
-            let h_send_clone = h_send.clone();
             std::thread::Builder::new()
                 .name(format!("thread{i}"))
                 .spawn(move || {
-                    let node = Node::new(path, i, v, c, rec_c, h_send_clone);
+                    let node = Node::new(path, i, v, c, rec_c);
                     node.start(r, rec_r)
                 })
                 .unwrap()
@@ -395,7 +413,6 @@ where
             data_slices: 0,
             handles,
             coms,
-            receiver: h_rec,
         }
     }
 
@@ -416,28 +433,34 @@ where
     }
 
     fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
-        for data_idx in 0..D {
-            let dev_idx = Self::dev_idx(data_slice, data_idx);
+        let receivers: [oneshot::Receiver<HeadNodeMsg<X>>; D] = std::array::from_fn(|i| {
+            let dev_idx = Self::dev_idx(data_slice, i);
+            let (rt, tx) = oneshot::channel();
             self.coms[dev_idx]
-                .send(Msg::HeadNodeDataRequest { data_slice })
-                .unwrap()
-        }
+                    .send(Msg::HeadNodeDataRequest { data_slice, oneshot_send: rt })
+                    .unwrap();
+            tx
+        });
 
-        let mut count = 0;
         let mut result = [[0u8; X]; D];
-        while count < D {
-            let msg = self.receiver.recv().unwrap();
-            match msg {
-                HeadNodeMsg::Data {
-                    data_slice,
-                    data,
-                    data_idx,
-                } => result[data_idx] = galois::as_bytes(data),
-            }
-            count += 1;
+        for (i, receiver) in receivers.into_iter().enumerate() {
+            let msg = receiver.recv().unwrap();
+            assert_eq!(msg.data_slice, data_slice);
+            result[i] = galois::as_bytes(msg.data);
         }
-
         result
+    }
+
+    fn read_data_at(&self, data_slice: usize, data_idx: usize) -> [u8; X] {
+        let dev_idx = Self::dev_idx(data_slice, data_idx);
+        let (rt, tx) = oneshot::channel();
+        self.coms[dev_idx]
+            .send(Msg::HeadNodeDataRequest { data_slice, oneshot_send: rt })
+            .unwrap();
+
+        let msg = tx.recv().unwrap();
+        assert_eq!(msg.data_slice, data_slice);
+        galois::as_bytes(msg.data)
     }
 
     fn destroy_devices(&self, dev_idxs: &[usize]) {

@@ -51,11 +51,6 @@ where
         folder_path.join(name)
     }
 
-    pub fn read_data_at(&self, data_slice: usize, data_idx: usize) -> [u8; X] {
-        let file_path = self.data_file(data_slice, data_idx);
-        fs::read(file_path).unwrap().try_into().unwrap()
-    }
-
     pub fn read_checksum_at(&self, data_slice: usize, check_idx: usize) -> [u8; X] {
         let file_path = self.checksum_file(data_slice, check_idx);
         fs::read(file_path).unwrap().try_into().unwrap()
@@ -183,6 +178,11 @@ where
         self.data_slices += 1;
 
         self.data_slices - 1
+    }
+
+    fn read_data_at(&self, data_slice: usize, data_idx: usize) -> [u8; X] {
+        let file_path = self.data_file(data_slice, data_idx);
+        fs::read(file_path).unwrap().try_into().unwrap()
     }
 
     fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
