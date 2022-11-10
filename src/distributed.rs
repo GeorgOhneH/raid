@@ -62,7 +62,7 @@ pub enum RecoverMsg<const X: usize> {
 struct CurrentChecksumStatus<const X: usize> {
     count: usize,
     current_checksum: Box<[Galois; X]>,
-    missed_recover_dev_idx: Option<usize>,
+    missed_recover_dev_idx: Vec<usize>,
 }
 
 pub struct Node<const D: usize, const C: usize, const X: usize>
@@ -169,7 +169,6 @@ where
 
     pub fn start(mut self, rec: Receiver<Msg<X>>, recover_rec: Receiver<RecoverMsg<X>>) {
         while let Ok(msg) = rec.recv() {
-            //println!("thread{}: {:?}", self.dev_idx, &msg);
             match msg {
                 Msg::NewData { data_slice, data } => {
                     for check_idx in 0..C {
@@ -210,7 +209,7 @@ where
 
                     let current_status = self.current_checksum.get(&data_slice);
 
-                    let zero = [Galois::zero(); X];
+                    let zero = Box::new([Galois::zero(); X]);
                     let current_checksum = if let Some(status) = current_status {
                         &status.current_checksum
                     } else {
@@ -220,32 +219,34 @@ where
                         current_checksum[i]
                             + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
                     }));
-                    if let Some(status) = current_status {
-                        if status.count + 1 == D {
-                            if let Some(dev_idx) = status.missed_recover_dev_idx {
-                                self.current_checksum.remove(&data_slice);
-                                self.write_checksum(data_slice, &new_checksum);
-                                self.recover_coms[dev_idx]
-                                    .send(RecoverMsg::RequestedData {
-                                        data_slice,
-                                        data: new_checksum,
-                                        dev_idx: self.dev_idx,
-                                    })
-                                    .unwrap();
-                            }
-                        } else {
-                            let mut status = self.current_checksum.get_mut(&data_slice).unwrap();
-                            status.count += 1;
-                            status.current_checksum = new_checksum;
+                    let new_status = if let Some(status) = current_status {
+                        CurrentChecksumStatus {
+                            count: status.count + 1,
+                            current_checksum: new_checksum,
+                            missed_recover_dev_idx: status.missed_recover_dev_idx.clone(),
                         }
                     } else {
-                        let status = CurrentChecksumStatus {
+                        CurrentChecksumStatus {
                             count: 1,
                             current_checksum: new_checksum,
-                            missed_recover_dev_idx: None,
-                        };
-                        self.current_checksum.insert(data_slice, status);
+                            missed_recover_dev_idx: vec![],
+                        }
                     };
+                    if new_status.count == D {
+                        self.current_checksum.remove(&data_slice);
+                        self.write_checksum(data_slice, &new_status.current_checksum);
+                        for dev_idx in new_status.missed_recover_dev_idx {
+                            self.recover_coms[dev_idx]
+                                .send(RecoverMsg::RequestedData {
+                                    data_slice,
+                                    data: new_status.current_checksum.clone(),
+                                    dev_idx: self.dev_idx,
+                                })
+                                .unwrap();
+                        }
+                    } else {
+                        self.current_checksum.insert(data_slice, new_status);
+                    }
                 }
                 Msg::UpdateDataChecksum {
                     data_slice,
@@ -279,7 +280,8 @@ where
                             .unwrap();
                     } else {
                         if let Some(checksum_status) = self.current_checksum.get_mut(&data_slice) {
-                            checksum_status.missed_recover_dev_idx = Some(dev_idx);
+
+                            checksum_status.missed_recover_dev_idx.push(dev_idx);
                         } else {
                             self.recover_coms[dev_idx]
                                 .send(RecoverMsg::RequestedData {
@@ -325,7 +327,6 @@ where
             let mut r_data_idx = vec![];
             let mut r_check_idx = vec![];
             while let Ok(msg) = recover_rec.recv() {
-                //println!("thread{}: msg {:?}", self.dev_idx, &msg);
                 match msg {
                     RecoverMsg::RequestedData {
                         data_slice,

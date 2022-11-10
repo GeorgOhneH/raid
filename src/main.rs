@@ -21,7 +21,7 @@ pub mod single;
 // echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 fn main() {
     const X: usize = 4194304 / 16;
-    fuzz_file_test::<HeadNode<1, 2, X>, 1, 2, X>(100);
+    fuzz_file_test::<HeadNode<6, 4, X>, 6, 4, X>(100);
 }
 
 
