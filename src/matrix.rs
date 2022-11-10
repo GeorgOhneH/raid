@@ -1,6 +1,7 @@
-use crate::galois::Galois;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Index, IndexMut};
+
+use crate::galois::Galois;
 
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-96-332.pdf
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-03-504.pdf
@@ -57,8 +58,8 @@ where
 {
     pub fn gaussian_elimination<const X: usize>(
         &mut self,
-        mut vec: [[Galois; X]; N],
-    ) -> [[Galois; X]; N] {
+        vec: &mut [Box<[Galois; X]>; N],
+    ) {
         for m in 0..N {
             // swapp if zero
             if self.data[m][m] == Galois::zero() {
@@ -106,8 +107,6 @@ where
                 }
             }
         }
-
-        vec
     }
 }
 
@@ -173,8 +172,8 @@ where
         Matrix::<N, N> { data }
     }
 
-    pub fn mul_vec<const X: usize>(&self, vec: &[[Galois; X]; N]) -> [[Galois; X]; M] {
-        let mut result = [[Galois::zero(); X]; M];
+    pub fn mul_vec<const X: usize>(&self, vec: &[&[Galois; X]; N]) -> [Box<[Galois; X]>; M] {
+        let mut result = core::array::from_fn(|_| Box::new([Galois::zero(); X]));
         for (r, row) in result.iter_mut().zip(&self.data) {
             for (m, v) in row.iter().zip(vec) {
                 for x_idx in 0..X {
@@ -185,8 +184,8 @@ where
         result
     }
 
-    pub fn mul_vec_at<const X: usize>(&self, vec: &[[Galois; X]; N], idx: usize) -> [Galois; X] {
-        let mut r = [Galois::zero(); X];
+    pub fn mul_vec_at<const X: usize>(&self, vec: &[Box<[Galois; X]>; N], idx: usize) -> Box<[Galois; X]> {
+        let mut r = Box::new([Galois::zero(); X]);
         let row = &self.data[idx];
         for (m, v) in row.iter().zip(vec) {
             for x_idx in 0..X {

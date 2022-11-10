@@ -1,7 +1,8 @@
-use crate::raid::RAID;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::path::PathBuf;
+
+use crate::raid::RAID;
 
 #[derive(Debug, Clone)]
 struct FileLocation {
@@ -30,8 +31,8 @@ impl FileLocation {
 
 pub struct FileHandler<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>
 where
-    [(); { D * X }]:,
-    [(); { X * D }]:,
+    [(); D * X]:,
+    [(); X * D]:,
 {
     raid: R,
     file_locations: HashMap<String, FileLocation>,
@@ -41,8 +42,8 @@ where
 
 impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandler<R, D, C, X>
 where
-    [(); { D * X }]:,
-    [(); { X * D }]:,
+    [(); D * X]:,
+    [(); X * D]:,
 {
     pub fn new(path: PathBuf) -> Self {
         Self {
@@ -51,6 +52,13 @@ where
             current_slice: 0,
             current_data_idx: 0,
         }
+    }
+    pub fn destroy_devices(&self, dev_idxs: &[usize]) {
+        self.raid.destroy_devices(dev_idxs)
+    }
+
+    pub fn shutdown(self) {
+        self.raid.shutdown()
     }
 
     fn increment_data_idx(&mut self) {
@@ -74,13 +82,13 @@ where
             }
 
             if remainder.len() != 0 {
-                let data = core::array::from_fn(|i| {
+                let data = Box::new(core::array::from_fn(|i| {
                     if i < remainder.len() {
                         remainder[i]
                     } else {
                         0u8
                     }
-                });
+                }));
                 self.raid
                     .update_data(&data, self.current_slice, self.current_data_idx);
                 self.increment_data_idx()
@@ -102,28 +110,30 @@ where
 
         let (chunks, remainder) = rest.as_chunks::<{ X * D }>();
         for chunk in chunks {
-            let (data, _) = chunk.as_chunks::<X>();
-            self.raid.add_data(data.try_into().unwrap());
+            let data: [&[u8; X]; D] =
+                core::array::from_fn(|i| chunk[i * X..(i + 1) * X].try_into().unwrap());
+            self.raid.add_data(&data);
             self.current_slice += 1
         }
 
         let (chunks, remainder) = remainder.as_chunks::<X>();
-        let mut last_data = chunks.to_vec();
+        let mut last_data: Vec<_> = chunks.into_iter().map(|x| x).collect();
+        let data = Box::new(core::array::from_fn(|i| {
+            if i < remainder.len() {
+                remainder[i]
+            } else {
+                0u8
+            }
+        }));
         if remainder.len() != 0 {
-            let data = core::array::from_fn(|i| {
-                if i < remainder.len() {
-                    remainder[i]
-                } else {
-                    0u8
-                }
-            });
-            last_data.push(data);
+            last_data.push(&data);
         }
         for _ in 0..last_data.len() {
             self.increment_data_idx()
         }
+        let zeros = Box::new([0u8; X]);
         while last_data.len() < D {
-            last_data.push([0u8; X])
+            last_data.push(&zeros)
         }
         self.raid.add_data(&last_data.try_into().unwrap());
         self.current_slice += 1
@@ -135,9 +145,9 @@ where
         let mut result = Vec::with_capacity(file_location.length);
         while read_bytes + X < file_location.length {
             result.extend_from_slice(
-                &self
-                    .raid
-                    .read_data_at(file_location.start_slice, file_location.start_data_idx),
+                self.raid
+                    .read_data_at(file_location.start_slice, file_location.start_data_idx)
+                    .as_slice(),
             );
             file_location.increment_data_idx::<D>();
             read_bytes += X;

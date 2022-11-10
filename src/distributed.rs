@@ -1,41 +1,41 @@
-use crate::matrix::Matrix;
-use std::path::PathBuf;
-
-use crate::galois;
-use crate::galois::Galois;
-use crate::raid::RAID;
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs;
 use std::fs::create_dir;
+use std::path::PathBuf;
 use std::thread::JoinHandle;
-use std::collections::HashMap;
+
+use crossbeam_channel::{unbounded, Receiver, Sender};
+
+use crate::galois;
+use crate::galois::Galois;
+use crate::matrix::Matrix;
+use crate::raid::RAID;
 
 #[derive(Debug)]
-pub struct  HeadNodeMsg<const X: usize> {
-        data_slice: usize,
-        data: [Galois; X],
-        data_idx: usize,
+pub struct HeadNodeMsg<const X: usize> {
+    data_slice: usize,
+    data: Box<[Galois; X]>,
 }
 
 #[derive(Debug)]
 pub enum Msg<const X: usize> {
     NewData {
         data_slice: usize,
-        data: [Galois; X],
+        data: Box<[Galois; X]>,
     },
     NewDataChecksum {
         data_slice: usize,
-        data: [Galois; X],
+        data: Box<[Galois; X]>,
         dev_idx: usize,
     },
     UpdateData {
         data_slice: usize,
-        data: [Galois; X],
+        data: Box<[Galois; X]>,
     },
     UpdateDataChecksum {
         data_slice: usize,
-        diff: [Galois; X],
+        diff: Box<[Galois; X]>,
         dev_idx: usize,
     },
     NeedRecover {
@@ -44,23 +44,25 @@ pub enum Msg<const X: usize> {
     },
     HeadNodeDataRequest {
         data_slice: usize,
-        oneshot_send: oneshot::Sender<HeadNodeMsg<X>>
+        oneshot_send: oneshot::Sender<HeadNodeMsg<X>>,
     },
     DestroyStorage,
+    Shutdown,
 }
 
 #[derive(Debug)]
 pub enum RecoverMsg<const X: usize> {
     RequestedData {
         data_slice: usize,
-        data: [Galois; X],
+        data: Box<[Galois; X]>,
         dev_idx: usize,
     },
 }
 
 struct CurrentChecksumStatus<const X: usize> {
     count: usize,
-    current_checksum: [Galois; X]
+    current_checksum: Box<[Galois; X]>,
+    missed_recover_dev_idx: Option<usize>,
 }
 
 pub struct Node<const D: usize, const C: usize, const X: usize>
@@ -76,7 +78,7 @@ where
     coms: [Sender<Msg<X>>; D + C],
     recover_coms: [Sender<RecoverMsg<X>>; D + C],
     data_slices: usize,
-    current_checksum: HashMap<usize, CurrentChecksumStatus<X>>
+    current_checksum: HashMap<usize, CurrentChecksumStatus<X>>,
 }
 
 impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
@@ -102,7 +104,7 @@ where
             coms,
             recover_coms,
             data_slices: 0,
-            current_checksum: HashMap::new()
+            current_checksum: HashMap::new(),
         }
     }
 
@@ -145,12 +147,12 @@ where
         self.path.join(name)
     }
 
-    fn read_data(&self, data_slice: usize) -> [Galois; X] {
+    fn read_data(&self, data_slice: usize) -> Box<[Galois; X]> {
         let file_path = self.data_file(data_slice);
         galois::from_bytes(fs::read(file_path).unwrap().try_into().unwrap())
     }
 
-    fn read_checksum(&self, data_slice: usize) -> [Galois; X] {
+    fn read_checksum(&self, data_slice: usize) -> Box<[Galois; X]> {
         let file_path = self.checksum_file(data_slice);
         galois::from_bytes(fs::read(file_path).unwrap().try_into().unwrap())
     }
@@ -185,7 +187,7 @@ where
                 }
                 Msg::UpdateData { data_slice, data } => {
                     let old_data = self.read_data(data_slice);
-                    let diff_data = core::array::from_fn(|i| data[i] - old_data[i]);
+                    let diff_data = Box::new(core::array::from_fn(|i| data[i] - old_data[i]));
                     for check_idx in 0..C {
                         let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev]
@@ -214,14 +216,23 @@ where
                     } else {
                         &zero
                     };
-                    let new_checksum = core::array::from_fn(|i| {
+                    let new_checksum = Box::new(core::array::from_fn(|i| {
                         current_checksum[i]
                             + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
-                    });
+                    }));
                     if let Some(status) = current_status {
                         if status.count + 1 == D {
-                            self.current_checksum.remove(&data_slice);
-                            self.write_checksum(data_slice, &new_checksum);
+                            if let Some(dev_idx) = status.missed_recover_dev_idx {
+                                self.current_checksum.remove(&data_slice);
+                                self.write_checksum(data_slice, &new_checksum);
+                                self.recover_coms[dev_idx]
+                                    .send(RecoverMsg::RequestedData {
+                                        data_slice,
+                                        data: new_checksum,
+                                        dev_idx: self.dev_idx,
+                                    })
+                                    .unwrap();
+                            }
                         } else {
                             let mut status = self.current_checksum.get_mut(&data_slice).unwrap();
                             status.count += 1;
@@ -231,6 +242,7 @@ where
                         let status = CurrentChecksumStatus {
                             count: 1,
                             current_checksum: new_checksum,
+                            missed_recover_dev_idx: None,
                         };
                         self.current_checksum.insert(data_slice, status);
                     };
@@ -257,28 +269,37 @@ where
                     data_slice,
                     dev_idx,
                 } => {
-                    let data = if Self::data_check_idx(self.dev_idx, data_slice) < D {
-                        self.read_data(data_slice)
+                    if Self::data_check_idx(self.dev_idx, data_slice) < D {
+                        self.recover_coms[dev_idx]
+                            .send(RecoverMsg::RequestedData {
+                                data_slice,
+                                data: self.read_data(data_slice),
+                                dev_idx: self.dev_idx,
+                            })
+                            .unwrap();
                     } else {
-                        self.read_checksum(data_slice)
-                    };
-                    self.recover_coms[dev_idx]
-                        .send(RecoverMsg::RequestedData {
-                            data_slice,
-                            data,
-                            dev_idx: self.dev_idx,
-                        })
-                        .unwrap();
+                        if let Some(checksum_status) = self.current_checksum.get_mut(&data_slice) {
+                            checksum_status.missed_recover_dev_idx = Some(dev_idx);
+                        } else {
+                            self.recover_coms[dev_idx]
+                                .send(RecoverMsg::RequestedData {
+                                    data_slice,
+                                    data: self.read_checksum(data_slice),
+                                    dev_idx: self.dev_idx,
+                                })
+                                .unwrap();
+                        }
+                    }
                 }
-                Msg::HeadNodeDataRequest { data_slice, oneshot_send: oneshot_rec, } => {
+                Msg::HeadNodeDataRequest {
+                    data_slice,
+                    oneshot_send: oneshot_rec,
+                } => {
                     let data = self.read_data(data_slice);
-                    oneshot_rec
-                        .send(HeadNodeMsg {
-                            data_slice,
-                            data,
-                            data_idx: self.data_idx(data_slice),
-                        })
-                        .unwrap();
+                    oneshot_rec.send(HeadNodeMsg { data_slice, data }).unwrap();
+                }
+                Msg::Shutdown => {
+                    return;
                 }
             }
         }
@@ -331,7 +352,9 @@ where
 
             r_data.append(&mut r_check);
             let mut rec_matrix = self.vandermonde.recovery_matrix(r_data_idx, r_check_idx);
-            let rec_data = rec_matrix.gaussian_elimination(r_data.try_into().unwrap());
+
+            let mut rec_data: [Box<[Galois; X]>; D] = r_data.try_into().unwrap();
+            rec_matrix.gaussian_elimination(&mut rec_data);
 
             let data_check_idx = Self::data_check_idx(self.dev_idx, current_data_slice);
             if data_check_idx < D {
@@ -352,8 +375,8 @@ where
     [(); D + D]:,
 {
     data_slices: usize,
-    handles: [JoinHandle<()>; D + C],
     coms: [Sender<Msg<X>>; D + C],
+    handles: [JoinHandle<()>; D + C],
 }
 
 impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
@@ -392,7 +415,6 @@ where
         let recover_coms = core::array::from_fn(|i| recover_channels[i].0.clone());
 
         let vandermonde = Matrix::<C, D>::reed_solomon();
-
         let handles = core::array::from_fn(|i| {
             let path = paths[i].clone();
             let v = vandermonde.clone();
@@ -416,14 +438,14 @@ where
         }
     }
 
-    fn add_data(&mut self, data: &[[u8; X]; D]) -> usize {
-        let data: &[[Galois; X]; D] = unsafe { core::mem::transmute(data) };
+    fn add_data(&mut self, data: &[&[u8; X]; D]) -> usize {
         for data_idx in 0..D {
+            let pdata = Box::new( galois::from_bytes_ref(&data[data_idx]).clone());
             let dev_idx = Self::dev_idx(self.data_slices, data_idx);
             self.coms[dev_idx]
                 .send(Msg::NewData {
                     data_slice: self.data_slices,
-                    data: data[data_idx].clone(),
+                    data: pdata,
                 })
                 .unwrap()
         }
@@ -432,17 +454,20 @@ where
         self.data_slices - 1
     }
 
-    fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
+    fn read_data(&self, data_slice: usize) -> [Box<[u8; X]>; D] {
         let receivers: [oneshot::Receiver<HeadNodeMsg<X>>; D] = std::array::from_fn(|i| {
             let dev_idx = Self::dev_idx(data_slice, i);
             let (rt, tx) = oneshot::channel();
             self.coms[dev_idx]
-                    .send(Msg::HeadNodeDataRequest { data_slice, oneshot_send: rt })
-                    .unwrap();
+                .send(Msg::HeadNodeDataRequest {
+                    data_slice,
+                    oneshot_send: rt,
+                })
+                .unwrap();
             tx
         });
 
-        let mut result = [[0u8; X]; D];
+        let mut result = core::array::from_fn(|_|Box::new([0u8; X]));
         for (i, receiver) in receivers.into_iter().enumerate() {
             let msg = receiver.recv().unwrap();
             assert_eq!(msg.data_slice, data_slice);
@@ -451,11 +476,14 @@ where
         result
     }
 
-    fn read_data_at(&self, data_slice: usize, data_idx: usize) -> [u8; X] {
+    fn read_data_at(&self, data_slice: usize, data_idx: usize) -> Box<[u8; X]> {
         let dev_idx = Self::dev_idx(data_slice, data_idx);
         let (rt, tx) = oneshot::channel();
         self.coms[dev_idx]
-            .send(Msg::HeadNodeDataRequest { data_slice, oneshot_send: rt })
+            .send(Msg::HeadNodeDataRequest {
+                data_slice,
+                oneshot_send: rt,
+            })
             .unwrap();
 
         let msg = tx.recv().unwrap();
@@ -470,10 +498,19 @@ where
     }
 
     fn update_data(&self, data: &[u8; X], data_slice: usize, data_idx: usize) {
-        let data = galois::from_bytes_ref(data).clone();
+        let data = Box::new(galois::from_bytes_ref(data).clone());
         let dev_idx = Self::dev_idx(data_slice, data_idx);
         self.coms[dev_idx]
             .send(Msg::UpdateData { data_slice, data })
             .unwrap()
+    }
+
+    fn shutdown(self) {
+        for dev_idx in 0..D + C {
+            self.coms[dev_idx].send(Msg::Shutdown).unwrap()
+        }
+        for handle in self.handles {
+            handle.join().unwrap();
+        }
     }
 }

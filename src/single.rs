@@ -1,11 +1,12 @@
+use std::fs;
+use std::fs::create_dir;
+use std::path::{PathBuf};
+use std::prelude::rust_2021::TryInto;
+
 use crate::galois;
 use crate::galois::Galois;
 use crate::matrix::Matrix;
 use crate::raid::RAID;
-use std::fs;
-use std::fs::create_dir;
-use std::path::{Path, PathBuf};
-use std::prelude::rust_2021::TryInto;
 
 pub struct SingleServer<const D: usize, const C: usize, const X: usize>
 where
@@ -14,7 +15,6 @@ where
     [(); C + C]:,
     [(); D + D]:,
 {
-    root_path: PathBuf,
     data_slices: usize,
     vandermonde: Matrix<C, D>,
     paths: [PathBuf; C + D],
@@ -51,12 +51,12 @@ where
         folder_path.join(name)
     }
 
-    pub fn read_checksum_at(&self, data_slice: usize, check_idx: usize) -> [u8; X] {
+    pub fn read_checksum_at(&self, data_slice: usize, check_idx: usize) -> Box<[u8; X]> {
         let file_path = self.checksum_file(data_slice, check_idx);
         fs::read(file_path).unwrap().try_into().unwrap()
     }
 
-    pub fn read_checksum(&self, data_slice: usize) -> [[u8; X]; C] {
+    pub fn read_checksum(&self, data_slice: usize) -> [Box<[u8; X]>; C] {
         core::array::from_fn(|i| self.read_checksum_at(data_slice, i))
     }
 
@@ -118,7 +118,8 @@ where
             }
 
             let mut rec_matrix = self.vandermonde.recovery_matrix(r_data_idx, r_check_idx);
-            let data = rec_matrix.gaussian_elimination(r_data_check.try_into().unwrap());
+            let mut data: [Box<[Galois; X]>; D] = r_data_check.try_into().unwrap();
+            rec_matrix.gaussian_elimination(&mut data);
 
             for data_idx in 0..D {
                 let folder_id_i = Self::folder_id(data_slice, data_idx);
@@ -154,15 +155,14 @@ where
         }
 
         Self {
-            root_path,
             data_slices: 0,
             vandermonde: Matrix::<C, D>::reed_solomon(),
             paths,
         }
     }
 
-    fn add_data(&mut self, data: &[[u8; X]; D]) -> usize {
-        let data: &[[Galois; X]; D] = unsafe { core::mem::transmute(data) };
+    fn add_data(&mut self, data: &[&[u8; X]; D]) -> usize {
+        let data: &[&[Galois; X]; D] = unsafe { core::mem::transmute(data) };
         let checksum = self.vandermonde.mul_vec(data);
 
         for d_idx in 0..D {
@@ -180,12 +180,12 @@ where
         self.data_slices - 1
     }
 
-    fn read_data_at(&self, data_slice: usize, data_idx: usize) -> [u8; X] {
+    fn read_data_at(&self, data_slice: usize, data_idx: usize) -> Box<[u8; X]> {
         let file_path = self.data_file(data_slice, data_idx);
         fs::read(file_path).unwrap().try_into().unwrap()
     }
 
-    fn read_data(&self, data_slice: usize) -> [[u8; X]; D] {
+    fn read_data(&self, data_slice: usize) -> [Box<[u8; X]>; D] {
         core::array::from_fn(|i| self.read_data_at(data_slice, i))
     }
 

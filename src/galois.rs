@@ -2,6 +2,7 @@
 
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+
 include!(concat!(env!("OUT_DIR"), "/table.rs"));
 
 /// The field GF(2^8).
@@ -25,16 +26,16 @@ impl Galois {
     }
 }
 
-pub fn from_bytes<const X: usize>(bytes: [u8; X]) -> [Galois; X] {
-    unsafe { core::mem::transmute_copy(&bytes) }
+pub fn from_bytes<const X: usize>(bytes: Box<[u8; X]>) -> Box<[Galois; X]> {
+    unsafe { core::mem::transmute(bytes) }
 }
 
 pub fn from_bytes_ref<const X: usize>(bytes: &[u8; X]) -> &[Galois; X] {
     unsafe { core::mem::transmute(bytes) }
 }
 
-pub fn as_bytes<const X: usize>(galois_slice: [Galois; X]) -> [u8; X] {
-    unsafe { core::mem::transmute_copy(&galois_slice) }
+pub fn as_bytes<const X: usize>(galois_slice: Box<[Galois; X]>) -> Box<[u8; X]> {
+    unsafe { core::mem::transmute(galois_slice) }
 }
 
 pub fn as_bytes_ref<const X: usize>(galois_slice: &[Galois; X]) -> &[u8; X] {
