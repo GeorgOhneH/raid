@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 #![feature(slice_as_chunks)]
 #![feature(array_chunks)]
+#![feature(new_uninit)]
 
 use std::path::PathBuf;
 
@@ -20,7 +21,7 @@ pub mod single;
 
 // echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 fn main() {
-    const X: usize = 4194304 / 16;
+    const X: usize = 4194304; // 4MB
     fuzz_file_test::<HeadNode<6, 4, X>, 6, 4, X>(100);
 }
 
@@ -83,7 +84,7 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
 
     let mut data: Vec<_> = (0..num_data_slices)
         .map(|_| {
-            let mut data = core::array::from_fn(|i| Box::new([0u8; X]));
+            let mut data = core::array::from_fn(|i| galois::as_bytes(galois::zeros::<X>()));
             for i in 0..D {
                 rng.fill_bytes(data[i].as_mut_slice())
             }
@@ -92,6 +93,7 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
         .collect();
 
     for i in 0..num_data_slices {
+        println!("Fuzz RAID Round {i}");
         node.add_data(unsafe { core::mem::transmute(&data[i]) });
 
         let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
@@ -111,7 +113,7 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
         let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
         assert_eq!(&data_read, &data[..i + 1]);
 
-        let mut changed_data = Box::new([0u8; X]);
+        let mut changed_data = galois::as_bytes(galois::zeros::<X>());
         rng.fill_bytes(changed_data.as_mut_slice());
         let data_slice = rng.gen_range(0..i + 1);
         let data_idx = rng.gen_range(0..D);

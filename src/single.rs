@@ -53,7 +53,7 @@ where
 
     pub fn read_checksum_at(&self, data_slice: usize, check_idx: usize) -> Box<[u8; X]> {
         let file_path = self.checksum_file(data_slice, check_idx);
-        fs::read(file_path).unwrap().try_into().unwrap()
+        fs::read(file_path).unwrap().into_boxed_slice().try_into().unwrap()
     }
 
     pub fn read_checksum(&self, data_slice: usize) -> [Box<[u8; X]>; C] {
@@ -182,7 +182,7 @@ where
 
     fn read_data_at(&self, data_slice: usize, data_idx: usize) -> Box<[u8; X]> {
         let file_path = self.data_file(data_slice, data_idx);
-        fs::read(file_path).unwrap().try_into().unwrap()
+        fs::read(file_path).unwrap().into_boxed_slice().try_into().unwrap()
     }
 
     fn read_data(&self, data_slice: usize) -> [Box<[u8; X]>; D] {
@@ -206,7 +206,7 @@ where
 
         for check_idx in 0..C {
             let old_checksum = galois::from_bytes(self.read_checksum_at(data_slice, check_idx));
-            let new_checksum: [Galois; X] = core::array::from_fn(|i| {
+            let new_checksum: Box<[Galois; X]> = galois::from_fn(|i| {
                 old_checksum[i] + self.vandermonde[check_idx][data_idx] * (data[i] - old_data[i])
             });
             let file_path = self.checksum_file(data_slice, check_idx);

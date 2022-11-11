@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::ops::{Index, IndexMut};
 
 use crate::galois::Galois;
+use crate::galois;
 
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-96-332.pdf
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-03-504.pdf
@@ -173,7 +174,7 @@ where
     }
 
     pub fn mul_vec<const X: usize>(&self, vec: &[&[Galois; X]; N]) -> [Box<[Galois; X]>; M] {
-        let mut result = core::array::from_fn(|_| Box::new([Galois::zero(); X]));
+        let mut result = core::array::from_fn(|_| galois::zeros());
         for (r, row) in result.iter_mut().zip(&self.data) {
             for (m, v) in row.iter().zip(vec) {
                 for x_idx in 0..X {
@@ -185,7 +186,7 @@ where
     }
 
     pub fn mul_vec_at<const X: usize>(&self, vec: &[Box<[Galois; X]>; N], idx: usize) -> Box<[Galois; X]> {
-        let mut r = Box::new([Galois::zero(); X]);
+        let mut r = galois::zeros();
         let row = &self.data[idx];
         for (m, v) in row.iter().zip(vec) {
             for x_idx in 0..X {

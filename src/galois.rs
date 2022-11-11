@@ -1,6 +1,8 @@
 //! Implementation of GF(2^8): the finite field with 2^8 elements.
 
+use core::mem;
 use std::fmt::{Display, Formatter};
+use std::mem::MaybeUninit;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 
 include!(concat!(env!("OUT_DIR"), "/table.rs"));
@@ -24,6 +26,55 @@ impl Galois {
     pub fn pow(self, n: usize) -> Self {
         Self(exp(self.0, n))
     }
+}
+
+pub fn zeros<const X: usize>() -> Box<[Galois; X]> {
+    let zero = Box::new_zeroed();
+    unsafe { zero.assume_init() }
+}
+
+pub fn zeros_raw<const X: usize>() -> Box<[u8; X]> {
+    let zero = Box::new_zeroed();
+    unsafe { zero.assume_init() }
+}
+
+pub fn from_fn<const X: usize, F>(mut cb: F) -> Box<[Galois; X]>
+where
+    F: FnMut(usize) -> Galois,
+{
+    let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
+    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+        elem.write(cb(i));
+    }
+    unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
+}
+
+pub fn from_fn_raw<const X: usize, F>(mut cb: F) -> Box<[u8; X]>
+    where
+        F: FnMut(usize) -> u8,
+{
+    let mut data: Box<[MaybeUninit<u8>; X]> = unsafe { Box::new_uninit().assume_init() };
+    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+        elem.write(cb(i));
+    }
+    unsafe { mem::transmute::<_, Box<[u8; X]>>(data) }
+}
+
+
+pub fn from_slice<const X: usize>(slice: &[Galois; X]) -> Box<[Galois; X]> {
+    let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
+    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+        elem.write(slice[i]);
+    }
+    unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
+}
+
+pub fn from_slice_raw<const X: usize>(slice: &[u8; X]) -> Box<[Galois; X]> {
+    let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
+    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+        elem.write(Galois::new(slice[i]));
+    }
+    unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
 }
 
 pub fn from_bytes<const X: usize>(bytes: Box<[u8; X]>) -> Box<[Galois; X]> {

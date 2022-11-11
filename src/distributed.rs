@@ -149,12 +149,12 @@ where
 
     fn read_data(&self, data_slice: usize) -> Box<[Galois; X]> {
         let file_path = self.data_file(data_slice);
-        galois::from_bytes(fs::read(file_path).unwrap().try_into().unwrap())
+        galois::from_bytes(fs::read(file_path).unwrap().into_boxed_slice().try_into().unwrap())
     }
 
     fn read_checksum(&self, data_slice: usize) -> Box<[Galois; X]> {
         let file_path = self.checksum_file(data_slice);
-        galois::from_bytes(fs::read(file_path).unwrap().try_into().unwrap())
+        galois::from_bytes(fs::read(file_path).unwrap().into_boxed_slice().try_into().unwrap())
     }
 
     fn write_data(&self, data_slice: usize, data: &[Galois; X]) {
@@ -186,7 +186,7 @@ where
                 }
                 Msg::UpdateData { data_slice, data } => {
                     let old_data = self.read_data(data_slice);
-                    let diff_data = Box::new(core::array::from_fn(|i| data[i] - old_data[i]));
+                    let diff_data = galois::from_fn(|i| data[i] - old_data[i]);
                     for check_idx in 0..C {
                         let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev]
@@ -209,16 +209,16 @@ where
 
                     let current_status = self.current_checksum.get(&data_slice);
 
-                    let zero = Box::new([Galois::zero(); X]);
+                    let zero = galois::zeros::<X>();
                     let current_checksum = if let Some(status) = current_status {
                         &status.current_checksum
                     } else {
                         &zero
                     };
-                    let new_checksum = Box::new(core::array::from_fn(|i| {
+                    let new_checksum = galois::from_fn(|i| {
                         current_checksum[i]
                             + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
-                    }));
+                    });
                     let new_status = if let Some(status) = current_status {
                         CurrentChecksumStatus {
                             count: status.count + 1,
@@ -255,7 +255,7 @@ where
                 } => {
                     let data_idx = Self::data_check_idx(dev_idx, data_slice);
                     let current_checksum = self.read_checksum(data_slice);
-                    let new_checksum = core::array::from_fn(|i| {
+                    let new_checksum = galois::from_fn(|i| {
                         current_checksum[i]
                             + self.vandermonde[self.check_idx(data_slice)][data_idx] * diff[i]
                     });
@@ -441,7 +441,7 @@ where
 
     fn add_data(&mut self, data: &[&[u8; X]; D]) -> usize {
         for data_idx in 0..D {
-            let pdata = Box::new( galois::from_bytes_ref(&data[data_idx]).clone());
+            let pdata = galois::from_slice_raw(data[data_idx]);
             let dev_idx = Self::dev_idx(self.data_slices, data_idx);
             self.coms[dev_idx]
                 .send(Msg::NewData {
@@ -468,7 +468,7 @@ where
             tx
         });
 
-        let mut result = core::array::from_fn(|_|Box::new([0u8; X]));
+        let mut result = core::array::from_fn(|_| galois::as_bytes(galois::zeros()));
         for (i, receiver) in receivers.into_iter().enumerate() {
             let msg = receiver.recv().unwrap();
             assert_eq!(msg.data_slice, data_slice);
@@ -499,7 +499,7 @@ where
     }
 
     fn update_data(&self, data: &[u8; X], data_slice: usize, data_idx: usize) {
-        let data = Box::new(galois::from_bytes_ref(data).clone());
+        let data = galois::from_slice(galois::from_bytes_ref(data));
         let dev_idx = Self::dev_idx(data_slice, data_idx);
         self.coms[dev_idx]
             .send(Msg::UpdateData { data_slice, data })

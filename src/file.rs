@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use std::path::PathBuf;
 
 use crate::raid::RAID;
+use crate::galois;
 
 #[derive(Debug, Clone)]
 struct FileLocation {
@@ -82,13 +83,13 @@ where
             }
 
             if remainder.len() != 0 {
-                let data = Box::new(core::array::from_fn(|i| {
+                let data = galois::from_fn_raw(|i| {
                     if i < remainder.len() {
                         remainder[i]
                     } else {
                         0u8
                     }
-                }));
+                });
                 self.raid
                     .update_data(&data, self.current_slice, self.current_data_idx);
                 self.increment_data_idx()
@@ -118,20 +119,20 @@ where
 
         let (chunks, remainder) = remainder.as_chunks::<X>();
         let mut last_data: Vec<_> = chunks.into_iter().map(|x| x).collect();
-        let data = Box::new(core::array::from_fn(|i| {
+        let data = galois::from_fn_raw(|i| {
             if i < remainder.len() {
                 remainder[i]
             } else {
                 0u8
             }
-        }));
+        });
         if remainder.len() != 0 {
             last_data.push(&data);
         }
         for _ in 0..last_data.len() {
             self.increment_data_idx()
         }
-        let zeros = Box::new([0u8; X]);
+        let zeros = galois::zeros_raw();
         while last_data.len() < D {
             last_data.push(&zeros)
         }
