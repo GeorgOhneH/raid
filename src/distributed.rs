@@ -265,12 +265,22 @@ impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
                     dev_idx,
                 } => {
                     let data_idx = Self::data_check_idx(dev_idx, data_slice);
-                    let current_checksum = self.read_checksum(data_slice);
-                    let new_checksum = galois::from_fn(|i| {
-                        current_checksum[i]
-                            + self.vandermonde[self.check_idx(data_slice)][data_idx] * diff[i]
-                    });
-                    self.write_checksum(data_slice, &new_checksum);
+                    let self_check_idx = self.check_idx(data_slice);
+                    let current_status = self.current_checksum.get_mut(&data_slice);
+                    if let Some(current_status) = current_status {
+                        let new_checksum = galois::from_fn(|i| {
+                            current_status.current_checksum[i]
+                                + self.vandermonde[self_check_idx][data_idx] * diff[i]
+                        });
+                        current_status.current_checksum = new_checksum;
+                    } else {
+                        let current_checksum = self.read_checksum(data_slice);
+                        let new_checksum = galois::from_fn(|i| {
+                            current_checksum[i]
+                                + self.vandermonde[self.check_idx(data_slice)][data_idx] * diff[i]
+                        });
+                        self.write_checksum(data_slice, &new_checksum);
+                    }
                 }
                 Msg::DestroyStorage {
                     oneshot_send,
