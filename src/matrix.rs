@@ -166,7 +166,7 @@ where
                     }
                 })
             } else {
-                self.data[cs[m - ds.len()]].clone()
+                self.data[cs[m - ds.len()]]
             }
         });
 

@@ -5,12 +5,24 @@ use std::fs::create_dir;
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Receiver, Sender, SendError};
 
 use crate::galois;
 use crate::galois::Galois;
 use crate::matrix::Matrix;
 use crate::raid::RAID;
+
+
+#[derive(Debug)]
+pub enum Error {
+    Shutdown
+}
+
+impl<T> From<SendError<T>> for Error {
+    fn from(_: SendError<T>) -> Self { Self::Shutdown }
+}
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct HeadNodeMsg<const X: usize> {
@@ -46,7 +58,9 @@ pub enum Msg<const X: usize> {
         data_slice: usize,
         oneshot_send: oneshot::Sender<HeadNodeMsg<X>>,
     },
-    DestroyStorage,
+    DestroyStorage {
+        oneshot_send: oneshot::Sender<()>,
+    },
     Shutdown,
 }
 
@@ -66,11 +80,11 @@ struct CurrentChecksumStatus<const X: usize> {
 }
 
 pub struct Node<const D: usize, const C: usize, const X: usize>
-where
-    [(); C + D]:,
-    [(); D + C]:,
-    [(); C + C]:,
-    [(); D + D]:,
+    where
+        [(); C + D]:,
+        [(); D + C]:,
+        [(); C + C]:,
+        [(); D + D]:,
 {
     dev_idx: usize,
     vandermonde: Matrix<C, D>,
@@ -82,11 +96,11 @@ where
 }
 
 impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
-where
-    [(); C + D]:,
-    [(); D + C]:,
-    [(); C + C]:,
-    [(); D + D]:,
+    where
+        [(); C + D]:,
+        [(); D + C]:,
+        [(); C + C]:,
+        [(); D + D]:,
 {
     pub fn new(
         path: PathBuf,
@@ -167,7 +181,7 @@ where
         fs::write(file_path, galois::as_bytes_ref(check)).unwrap();
     }
 
-    pub fn start(mut self, rec: Receiver<Msg<X>>, recover_rec: Receiver<RecoverMsg<X>>) {
+    pub fn start(mut self, rec: Receiver<Msg<X>>, recover_rec: Receiver<RecoverMsg<X>>) -> Result<()> {
         while let Ok(msg) = rec.recv() {
             match msg {
                 Msg::NewData { data_slice, data } => {
@@ -178,8 +192,7 @@ where
                                 data_slice,
                                 data: data.clone(),
                                 dev_idx: self.dev_idx,
-                            })
-                            .unwrap()
+                            })?;
                     }
                     self.data_slices = self.data_slices.max(data_slice);
                     self.write_data(data_slice, &data);
@@ -194,8 +207,7 @@ where
                                 data_slice,
                                 diff: diff_data.clone(),
                                 dev_idx: self.dev_idx,
-                            })
-                            .unwrap()
+                            })?;
                     }
                     self.write_data(data_slice, &data);
                 }
@@ -241,8 +253,7 @@ where
                                     data_slice,
                                     data: new_status.current_checksum.clone(),
                                     dev_idx: self.dev_idx,
-                                })
-                                .unwrap();
+                                })?;
                         }
                     } else {
                         self.current_checksum.insert(data_slice, new_status);
@@ -261,10 +272,13 @@ where
                     });
                     self.write_checksum(data_slice, &new_checksum);
                 }
-                Msg::DestroyStorage => {
+                Msg::DestroyStorage {
+                    oneshot_send,
+                } => {
                     let _ = std::fs::remove_dir_all(&self.path);
                     create_dir(&self.path).unwrap();
-                    self.recover(&recover_rec)
+                    self.recover(&recover_rec)?;
+                    oneshot_send.send(()).unwrap();
                 }
                 Msg::NeedRecover {
                     data_slice,
@@ -278,19 +292,16 @@ where
                                 dev_idx: self.dev_idx,
                             })
                             .unwrap();
+                    } else if let Some(checksum_status) = self.current_checksum.get_mut(&data_slice) {
+                        checksum_status.missed_recover_dev_idx.push(dev_idx);
                     } else {
-                        if let Some(checksum_status) = self.current_checksum.get_mut(&data_slice) {
-
-                            checksum_status.missed_recover_dev_idx.push(dev_idx);
-                        } else {
-                            self.recover_coms[dev_idx]
-                                .send(RecoverMsg::RequestedData {
-                                    data_slice,
-                                    data: self.read_checksum(data_slice),
-                                    dev_idx: self.dev_idx,
-                                })
-                                .unwrap();
-                        }
+                        self.recover_coms[dev_idx]
+                            .send(RecoverMsg::RequestedData {
+                                data_slice,
+                                data: self.read_checksum(data_slice),
+                                dev_idx: self.dev_idx,
+                            })
+                            .unwrap();
                     }
                 }
                 Msg::HeadNodeDataRequest {
@@ -301,13 +312,14 @@ where
                     oneshot_rec.send(HeadNodeMsg { data_slice, data }).unwrap();
                 }
                 Msg::Shutdown => {
-                    return;
+                    return Ok(());
                 }
             }
         }
+        Ok(())
     }
 
-    pub fn recover(&self, recover_rec: &Receiver<RecoverMsg<X>>) {
+    pub fn recover(&self, recover_rec: &Receiver<RecoverMsg<X>>) -> Result<()> {
         for current_data_slice in 0..self.data_slices + 1 {
             while !recover_rec.is_empty() {
                 recover_rec.recv().unwrap();
@@ -318,8 +330,7 @@ where
                         .send(Msg::NeedRecover {
                             dev_idx: self.dev_idx,
                             data_slice: current_data_slice,
-                        })
-                        .unwrap();
+                        })?;
                 }
             }
             let mut r_data = vec![];
@@ -365,15 +376,16 @@ where
                 self.write_checksum(current_data_slice, &checksum);
             }
         }
+        Ok(())
     }
 }
 
 pub struct HeadNode<const D: usize, const C: usize, const X: usize>
-where
-    [(); C + D]:,
-    [(); D + C]:,
-    [(); C + C]:,
-    [(); D + D]:,
+    where
+        [(); C + D]:,
+        [(); D + C]:,
+        [(); C + C]:,
+        [(); D + D]:,
 {
     data_slices: usize,
     coms: [Sender<Msg<X>>; D + C],
@@ -381,11 +393,11 @@ where
 }
 
 impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
-where
-    [(); C + D]:,
-    [(); D + C]:,
-    [(); C + C]:,
-    [(); D + D]:,
+    where
+        [(); C + D]:,
+        [(); D + C]:,
+        [(); C + C]:,
+        [(); D + D]:,
 {
     fn dev_idx(data_slice: usize, data_idx: usize) -> usize {
         (data_idx + data_slice) % (D + C)
@@ -393,11 +405,11 @@ where
 }
 
 impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for HeadNode<D, C, X>
-where
-    [(); C + D]:,
-    [(); D + C]:,
-    [(); C + C]:,
-    [(); D + D]:,
+    where
+        [(); C + D]:,
+        [(); D + C]:,
+        [(); C + C]:,
+        [(); D + D]:,
 {
     fn new(root_path: PathBuf) -> Self {
         let paths: [PathBuf; D + C] =
@@ -427,7 +439,7 @@ where
                 .name(format!("thread{i}"))
                 .spawn(move || {
                     let node = Node::new(path, i, v, c, rec_c);
-                    node.start(r, rec_r)
+                    let _ = node.start(r, rec_r);
                 })
                 .unwrap()
         });
@@ -493,9 +505,16 @@ where
     }
 
     fn destroy_devices(&self, dev_idxs: &[usize]) {
+        let mut txs = vec![];
         for dev_idx in dev_idxs {
-            self.coms[*dev_idx].send(Msg::DestroyStorage).unwrap()
+            let (rt, tx) = oneshot::channel();
+            txs.push(tx);
+            self.coms[*dev_idx].send(Msg::DestroyStorage {oneshot_send: rt}).unwrap()
         }
+        for tx in txs {
+            tx.recv().unwrap()
+        }
+
     }
 
     fn update_data(&self, data: &[u8; X], data_slice: usize, data_idx: usize) {

@@ -10,5 +10,12 @@ rand = "0.8"
 crossbeam-channel = "0.5.6"
 oneshot = "0.1.5"
 
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "file"
+harness = false
+
 [profile.release]
 debug = true

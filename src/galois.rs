@@ -43,7 +43,7 @@ where
     F: FnMut(usize) -> Galois,
 {
     let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
-    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+    for (i, elem) in (&mut data[..]).iter_mut().enumerate() {
         elem.write(cb(i));
     }
     unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
@@ -54,7 +54,7 @@ pub fn from_fn_raw<const X: usize, F>(mut cb: F) -> Box<[u8; X]>
         F: FnMut(usize) -> u8,
 {
     let mut data: Box<[MaybeUninit<u8>; X]> = unsafe { Box::new_uninit().assume_init() };
-    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+    for (i, elem) in (&mut data[..]).iter_mut().enumerate() {
         elem.write(cb(i));
     }
     unsafe { mem::transmute::<_, Box<[u8; X]>>(data) }
@@ -63,7 +63,7 @@ pub fn from_fn_raw<const X: usize, F>(mut cb: F) -> Box<[u8; X]>
 
 pub fn from_slice<const X: usize>(slice: &[Galois; X]) -> Box<[Galois; X]> {
     let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
-    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+    for (i, elem) in (&mut data[..]).iter_mut().enumerate() {
         elem.write(slice[i]);
     }
     unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
@@ -71,7 +71,7 @@ pub fn from_slice<const X: usize>(slice: &[Galois; X]) -> Box<[Galois; X]> {
 
 pub fn from_slice_raw<const X: usize>(slice: &[u8; X]) -> Box<[Galois; X]> {
     let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
-    for (i, elem) in (&mut data[..]).into_iter().enumerate() {
+    for (i, elem) in (&mut data[..]).iter_mut().enumerate() {
         elem.write(Galois::new(slice[i]));
     }
     unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }

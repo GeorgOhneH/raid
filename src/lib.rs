@@ -2,6 +2,7 @@
 #![feature(slice_as_chunks)]
 #![feature(array_chunks)]
 #![feature(new_uninit)]
+#![feature(const_mut_refs)]
 
 use std::path::PathBuf;
 
@@ -20,11 +21,6 @@ pub mod raid;
 pub mod single;
 
 // echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
-fn main() {
-    const X: usize = 4194304; // 4MB
-    fuzz_file_test::<HeadNode<6, 4, X>, 6, 4, X>(100);
-}
-
 
 fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
     num_data_slices: usize,
@@ -36,7 +32,7 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
     // "C:\\scripts\\rust\\raid\\fuzzfile"
     // "/mnt/c/scripts/rust/raid/fuzzfile"
     let mut file_handler: FileHandler<R, D, C, X> =
-        FileHandler::new(PathBuf::from("C:\\scripts\\rust\\raid\\fuzzfile"));
+        FileHandler::new(PathBuf::from("/mnt/c/scripts/rust/raid/fuzzfile"));
 
     let mut all_data = vec![];
 
@@ -84,9 +80,9 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
 
     let mut data: Vec<_> = (0..num_data_slices)
         .map(|_| {
-            let mut data = core::array::from_fn(|i| galois::as_bytes(galois::zeros::<X>()));
-            for i in 0..D {
-                rng.fill_bytes(data[i].as_mut_slice())
+            let mut data = core::array::from_fn(|_| galois::as_bytes(galois::zeros::<X>()));
+            for item in data.iter_mut() {
+                rng.fill_bytes(item.as_mut_slice())
             }
             data
         })
