@@ -16,9 +16,9 @@ use raid::single::SingleServer;
 
 // echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 fn main() {
-    const X: usize = 16; // 4MB
+    const X: usize = 2usize.pow(22); // 4MB
 
-    fuzz_file_test::<HeadNode<3, 4, X>, 3, 4, X>(100);
+    fuzz_file_test::<HeadNode<3, 4, X>, 3, 4, X>(10);
 }
 
 
@@ -29,8 +29,6 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
     [();  D * X ]:,
 {
     let mut rng = rand::thread_rng();
-    // "C:\\scripts\\rust\\raid\\fuzzfile"
-    // "/mnt/c/scripts/rust/raid/fuzzfile"
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("nodes");
     let mut file_handler: FileHandler<R, D, C, X> =
         FileHandler::new(path);

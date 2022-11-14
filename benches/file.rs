@@ -13,8 +13,8 @@ use std::time::Duration;
 
 
 fn criterion_benches(c: &mut Criterion) {
-    criterion_write(c.benchmark_group("write"));
     criterion_read(c.benchmark_group("read"));
+    criterion_write(c.benchmark_group("write"));
     criterion_recover(c.benchmark_group("recover"));
 }
 

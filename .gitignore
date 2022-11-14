@@ -1,5 +1,5 @@
 
 .idea
 /target
-/fuzz/nodes
-/fuzz/target
+/nodes/*
+!/nodes/.gitkeep
