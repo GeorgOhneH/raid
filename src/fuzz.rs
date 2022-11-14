@@ -30,6 +30,7 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
 {
     let mut rng = rand::thread_rng();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("nodes");
+    println!("Create FileHandler");
     let mut file_handler: FileHandler<R, D, C, X> =
         FileHandler::new(path);
     let mut all_data = vec![];
@@ -89,7 +90,7 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
 
     for i in 0..num_data_slices {
         println!("Fuzz RAID Round {i}");
-        node.add_data(unsafe { core::mem::transmute(&data[i]) });
+        node.add_data(unsafe { core::mem::transmute(&data[i]) }, i);
 
         let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
         assert_eq!(&data_read, &data[..i + 1]);

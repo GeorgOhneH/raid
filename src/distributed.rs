@@ -3,6 +3,7 @@ use std::convert::TryInto;
 use std::fs;
 use std::fs::create_dir;
 use std::path::PathBuf;
+use std::io;
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{unbounded, Receiver, Sender, SendError};
@@ -36,7 +37,16 @@ pub enum Msg<const X: usize> {
         data_slice: usize,
         data: Box<[Galois; X]>,
     },
+    NewDataAt {
+        data_slice: usize,
+        data: Box<[Galois; X]>,
+    },
     NewDataChecksum {
+        data_slice: usize,
+        data: Box<[Galois; X]>,
+        dev_idx: usize,
+    },
+    NewDataChecksumAt {
         data_slice: usize,
         data: Box<[Galois; X]>,
         dev_idx: usize,
@@ -59,6 +69,7 @@ pub enum Msg<const X: usize> {
         oneshot_send: oneshot::Sender<HeadNodeMsg<X>>,
     },
     DestroyStorage {
+        max_data_slice: usize,
         oneshot_send: oneshot::Sender<()>,
     },
     Shutdown,
@@ -91,7 +102,6 @@ pub struct Node<const D: usize, const C: usize, const X: usize>
     path: PathBuf,
     coms: [Sender<Msg<X>>; D + C],
     recover_coms: [Sender<RecoverMsg<X>>; D + C],
-    data_slices: usize,
     current_checksum: HashMap<usize, CurrentChecksumStatus<X>>,
 }
 
@@ -117,7 +127,6 @@ impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
             vandermonde,
             coms,
             recover_coms,
-            data_slices: 0,
             current_checksum: HashMap::new(),
         }
     }
@@ -163,7 +172,17 @@ impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
 
     fn read_data(&self, data_slice: usize) -> Box<[Galois; X]> {
         let file_path = self.data_file(data_slice);
-        galois::from_bytes(fs::read(file_path).unwrap().into_boxed_slice().try_into().unwrap())
+        match fs::read(&file_path) {
+            Ok(file) => {
+                galois::from_bytes(file.into_boxed_slice().try_into().unwrap())
+            }
+            Err(err) => {
+                let io::ErrorKind::NotFound = err.kind() else {
+                    panic!("{:?}", err)
+                };
+                galois::zeros()
+            }
+        }
     }
 
     fn read_checksum(&self, data_slice: usize) -> Box<[Galois; X]> {
@@ -194,7 +213,18 @@ impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
                                 dev_idx: self.dev_idx,
                             })?;
                     }
-                    self.data_slices = self.data_slices.max(data_slice);
+                    self.write_data(data_slice, &data);
+                }
+                Msg::NewDataAt { data_slice, data } => {
+                    for check_idx in 0..C {
+                        let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
+                        self.coms[check_dev]
+                            .send(Msg::NewDataChecksumAt {
+                                data_slice,
+                                data: data.clone(),
+                                dev_idx: self.dev_idx,
+                            })?;
+                    }
                     self.write_data(data_slice, &data);
                 }
                 Msg::UpdateData { data_slice, data } => {
@@ -216,28 +246,25 @@ impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
                     data,
                     dev_idx,
                 } => {
-                    self.data_slices = self.data_slices.max(data_slice);
                     let data_idx = Self::data_check_idx(dev_idx, data_slice);
 
                     let current_status = self.current_checksum.get(&data_slice);
 
                     let zero = galois::zeros::<X>();
-                    let current_checksum = if let Some(status) = current_status {
-                        &status.current_checksum
-                    } else {
-                        &zero
-                    };
-                    let new_checksum = galois::from_fn(|i| {
-                        current_checksum[i]
-                            + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
-                    });
                     let new_status = if let Some(status) = current_status {
+                        let new_checksum = galois::from_fn(|i| {
+                            status.current_checksum[i]
+                                + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
+                        });
                         CurrentChecksumStatus {
                             count: status.count + 1,
                             current_checksum: new_checksum,
                             missed_recover_dev_idx: status.missed_recover_dev_idx.clone(),
                         }
                     } else {
+                        let new_checksum = galois::from_fn(|i| {
+                            self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
+                        });
                         CurrentChecksumStatus {
                             count: 1,
                             current_checksum: new_checksum,
@@ -282,12 +309,39 @@ impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
                         self.write_checksum(data_slice, &new_checksum);
                     }
                 }
+                Msg::NewDataChecksumAt {
+                    data_slice,
+                    data,
+                    dev_idx,
+                } => {
+                    assert!(self.current_checksum.get(&data_slice).is_none());
+                    let data_idx = Self::data_check_idx(dev_idx, data_slice);
+                    let self_check_idx = self.check_idx(data_slice);
+                    let checksum_path = self.checksum_file(data_slice);
+                    let new_checksum: Box<[Galois; X]> = match fs::read(&checksum_path) {
+                        Ok(file) => {
+                            let old_checksum: Box<[Galois; X]> = galois::from_bytes(file.into_boxed_slice().try_into().unwrap());
+                            galois::from_fn(|i| {
+                                old_checksum[i] + self.vandermonde[self_check_idx][data_idx] * data[i]
+                            })
+                        }
+                        Err(err) => {
+                            let io::ErrorKind::NotFound = err.kind() else {
+                                panic!("{:?}", err)
+                            };
+                            galois::from_fn(|i| {
+                                self.vandermonde[self_check_idx][data_idx] * data[i]
+                            })
+                        }
+                    };
+                    fs::write(&checksum_path, galois::as_bytes_ref(&new_checksum)).unwrap();
+                }
                 Msg::DestroyStorage {
-                    oneshot_send,
+                    max_data_slice, oneshot_send,
                 } => {
                     let _ = std::fs::remove_dir_all(&self.path);
                     create_dir(&self.path).unwrap();
-                    self.recover(&recover_rec)?;
+                    self.recover(&recover_rec, max_data_slice)?;
                     oneshot_send.send(()).unwrap();
                 }
                 Msg::NeedRecover {
@@ -329,8 +383,8 @@ impl<const D: usize, const C: usize, const X: usize> Node<D, C, X>
         Ok(())
     }
 
-    pub fn recover(&self, recover_rec: &Receiver<RecoverMsg<X>>) -> Result<()> {
-        for current_data_slice in 0..self.data_slices + 1 {
+    pub fn recover(&self, recover_rec: &Receiver<RecoverMsg<X>>, max_data_slice: usize) -> Result<()> {
+        for current_data_slice in 0..max_data_slice + 1 {
             while !recover_rec.is_empty() {
                 recover_rec.recv().unwrap();
             }
@@ -397,7 +451,7 @@ pub struct HeadNode<const D: usize, const C: usize, const X: usize>
         [(); C + C]:,
         [(); D + D]:,
 {
-    data_slices: usize,
+    max_data_slices: usize,
     coms: [Sender<Msg<X>>; D + C],
     handles: [JoinHandle<()>; D + C],
 }
@@ -455,26 +509,36 @@ impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for HeadNode<
         });
 
         Self {
-            data_slices: 0,
+            max_data_slices: 0,
             handles,
             coms,
         }
     }
 
-    fn add_data(&mut self, data: &[&[u8; X]; D]) -> usize {
+    fn add_data(&mut self, data: &[&[u8; X]; D], data_slice: usize) {
+        self.max_data_slices = self.max_data_slices.max(data_slice);
         for data_idx in 0..D {
             let pdata = galois::from_slice_raw(data[data_idx]);
-            let dev_idx = Self::dev_idx(self.data_slices, data_idx);
+            let dev_idx = Self::dev_idx(data_slice, data_idx);
             self.coms[dev_idx]
                 .send(Msg::NewData {
-                    data_slice: self.data_slices,
+                    data_slice: data_slice,
                     data: pdata,
                 })
                 .unwrap()
         }
+    }
 
-        self.data_slices += 1;
-        self.data_slices - 1
+    fn add_data_at(&mut self, data: &[u8; X], data_slice: usize, data_idx: usize) {
+        self.max_data_slices = self.max_data_slices.max(data_slice);
+        let data = galois::from_slice_raw(data);
+        let dev_idx = Self::dev_idx(data_slice, data_idx);
+        self.coms[dev_idx]
+            .send(Msg::NewDataAt {
+                data_slice,
+                data,
+            })
+            .unwrap()
     }
 
     fn read_data(&self, data_slice: usize) -> [Box<[u8; X]>; D] {
@@ -519,12 +583,11 @@ impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for HeadNode<
         for dev_idx in dev_idxs {
             let (rt, tx) = oneshot::channel();
             txs.push(tx);
-            self.coms[*dev_idx].send(Msg::DestroyStorage {oneshot_send: rt}).unwrap()
+            self.coms[*dev_idx].send(Msg::DestroyStorage { oneshot_send: rt, max_data_slice: self.max_data_slices }).unwrap()
         }
         for tx in txs {
             tx.recv().unwrap()
         }
-
     }
 
     fn update_data(&self, data: &[u8; X], data_slice: usize, data_idx: usize) {

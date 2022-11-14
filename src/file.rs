@@ -40,7 +40,6 @@ pub struct FileHandler<R: RAID<D, C, X>, const D: usize, const C: usize, const X
     file_locations: HashMap<String, FileLocation>,
     current_slice: usize,
     current_data_idx: usize,
-    zero: Box<[u8; X]>
 }
 
 impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandler<R, D, C, X>
@@ -55,7 +54,6 @@ impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandl
             file_locations: HashMap::new(),
             current_slice: 0,
             current_data_idx: 0,
-            zero: galois::from_fn_raw(|i| 0u8),
         }
     }
     pub fn destroy_devices(&self, dev_idxs: &[usize]) {
@@ -93,9 +91,8 @@ impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandl
         let mut chunk_idx = 0;
 
         while self.current_data_idx != 0 && chunk_idx < chunks.len() {
-            debug_assert_eq!(self.raid.read_data_at(self.current_slice, self.current_data_idx), self.zero);
             self.raid
-                .update_data(chunks[chunk_idx], self.current_slice, self.current_data_idx);
+                .add_data_at(chunks[chunk_idx], self.current_slice, self.current_data_idx);
             self.increment_data_idx();
             chunk_idx += 1;
         }
@@ -103,7 +100,7 @@ impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandl
         while chunk_idx + D - 1 < chunks.len() {
             let data: [&[u8; X]; D] =
                 core::array::from_fn(|i| chunks[chunk_idx + i]);
-            assert_eq!(self.raid.add_data(&data), self.current_slice);
+            self.raid.add_data(&data, self.current_slice);
             self.current_slice += 1;
             chunk_idx += D;
         }
@@ -111,11 +108,9 @@ impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandl
             return;
         }
 
-        let zero_slice: [&[u8; X]; D] = core::array::from_fn(|_| self.zero.as_ref());
-        assert_eq!(self.raid.add_data(&zero_slice), self.current_slice);
         while chunk_idx < chunks.len() {
             self.raid
-                .update_data(chunks[chunk_idx], self.current_slice, self.current_data_idx);
+                .add_data_at(chunks[chunk_idx], self.current_slice, self.current_data_idx);
             self.increment_data_idx();
             chunk_idx += 1;
         }
