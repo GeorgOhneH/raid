@@ -15,7 +15,7 @@ fn gen_log_table(polynomial: usize) -> [u8; FIELD_SIZE] {
     for log in 0..FIELD_SIZE - 1 {
         result[b] = log as u8;
 
-        b <<=  1;
+        b <<= 1;
 
         if FIELD_SIZE <= b {
             b = (b - FIELD_SIZE) ^ polynomial;

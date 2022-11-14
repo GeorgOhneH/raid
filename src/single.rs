@@ -1,7 +1,7 @@
 use std::fs;
-use std::io;
 use std::fs::create_dir;
-use std::path::{PathBuf};
+use std::io;
+use std::path::PathBuf;
 use std::prelude::rust_2021::TryInto;
 
 use crate::galois;
@@ -10,11 +10,11 @@ use crate::matrix::Matrix;
 use crate::raid::RAID;
 
 pub struct SingleServer<const D: usize, const C: usize, const X: usize>
-    where
-        [(); C + D]:,
-        [(); D + C]:,
-        [(); C + C]:,
-        [(); D + D]:,
+where
+    [(); C + D]:,
+    [(); D + C]:,
+    [(); C + C]:,
+    [(); D + D]:,
 {
     max_data_slices: usize,
     vandermonde: Matrix<C, D>,
@@ -22,11 +22,11 @@ pub struct SingleServer<const D: usize, const C: usize, const X: usize>
 }
 
 impl<const D: usize, const C: usize, const X: usize> SingleServer<D, C, X>
-    where
-        [(); C + D]:,
-        [(); D + C]:,
-        [(); C + C]:,
-        [(); D + D]:,
+where
+    [(); C + D]:,
+    [(); D + C]:,
+    [(); C + C]:,
+    [(); D + D]:,
 {
     fn folder_id(data_slice: usize, data_idx: usize) -> usize {
         (data_idx + data_slice) % (D + C)
@@ -54,7 +54,11 @@ impl<const D: usize, const C: usize, const X: usize> SingleServer<D, C, X>
 
     pub fn read_checksum_at(&self, data_slice: usize, check_idx: usize) -> Box<[u8; X]> {
         let file_path = self.checksum_file(data_slice, check_idx);
-        fs::read(file_path).unwrap().into_boxed_slice().try_into().unwrap()
+        fs::read(file_path)
+            .unwrap()
+            .into_boxed_slice()
+            .try_into()
+            .unwrap()
     }
 
     pub fn read_checksum(&self, data_slice: usize) -> [Box<[u8; X]>; C] {
@@ -142,11 +146,11 @@ impl<const D: usize, const C: usize, const X: usize> SingleServer<D, C, X>
 }
 
 impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for SingleServer<D, C, X>
-    where
-        [(); C + D]:,
-        [(); D + C]:,
-        [(); C + C]:,
-        [(); D + D]:,
+where
+    [(); C + D]:,
+    [(); D + C]:,
+    [(); C + C]:,
+    [(); D + D]:,
 {
     fn new(root_path: PathBuf) -> Self {
         let paths = core::array::from_fn(|i| root_path.join(format!("device{i}")));
@@ -188,7 +192,8 @@ impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for SingleSer
             let checksum_path = self.checksum_file(data_slice, check_idx);
             let new_checksum: Box<[Galois; X]> = match fs::read(&checksum_path) {
                 Ok(file) => {
-                    let old_checksum: Box<[Galois; X]> = galois::from_bytes(file.into_boxed_slice().try_into().unwrap());
+                    let old_checksum: Box<[Galois; X]> =
+                        galois::from_bytes(file.into_boxed_slice().try_into().unwrap());
                     galois::from_fn(|i| {
                         old_checksum[i] + self.vandermonde[check_idx][data_idx] * data[i]
                     })
@@ -197,9 +202,7 @@ impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for SingleSer
                     let io::ErrorKind::NotFound = err.kind() else {
                         panic!("{:?}", err)
                     };
-                    galois::from_fn(|i| {
-                        self.vandermonde[check_idx][data_idx] * data[i]
-                    })
+                    galois::from_fn(|i| self.vandermonde[check_idx][data_idx] * data[i])
                 }
             };
             fs::write(&checksum_path, galois::as_bytes_ref(&new_checksum)).unwrap();
@@ -209,9 +212,7 @@ impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for SingleSer
     fn read_data_at(&self, data_slice: usize, data_idx: usize) -> Box<[u8; X]> {
         let file_path = self.data_file(data_slice, data_idx);
         match fs::read(&file_path) {
-            Ok(file) => {
-                file.into_boxed_slice().try_into().unwrap()
-            }
+            Ok(file) => file.into_boxed_slice().try_into().unwrap(),
             Err(err) => {
                 let io::ErrorKind::NotFound = err.kind() else {
                     panic!("{:?}", err)

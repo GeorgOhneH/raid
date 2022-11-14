@@ -6,33 +6,32 @@
 
 use std::path::PathBuf;
 
+use rand::SeedableRng;
 use rand::{Rng, RngCore};
 
 use raid::distributed::HeadNode;
 use raid::file::FileHandler;
-use raid::raid::RAID;
 use raid::galois;
+use raid::raid::RAID;
 use raid::single::SingleServer;
 
 // echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 fn main() {
     const X: usize = 2usize.pow(22); // 4MB
 
-    fuzz_file_test::<HeadNode<3, 4, X>, 3, 4, X>(10);
+    fuzz_file_test::<SingleServer<3, 4, X>, 3, 4, X>(100);
 }
-
 
 fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
     num_data_slices: usize,
 ) where
-    [();  X * D ]:,
-    [();  D * X ]:,
+    [(); X * D]:,
+    [(); D * X]:,
 {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("nodes");
     println!("Create FileHandler");
-    let mut file_handler: FileHandler<R, D, C, X> =
-        FileHandler::new(path);
+    let mut file_handler: FileHandler<R, D, C, X> = FileHandler::new(path);
     let mut all_data = vec![];
 
     for i in 0..num_data_slices {
@@ -58,6 +57,26 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
                 failures.push(failure)
             }
         }
+
+        println!("update_data {i}");
+        let data_slice = rng.gen_range(0..all_data.len());
+        let content = &mut all_data[data_slice];
+        let update_size = rng.gen_range(1..content.len() + 1);
+        let mut update_content = vec![0u8; update_size];
+        rng.fill_bytes(&mut update_content);
+        let offset = if content.len() - update_size != 0 {
+            rng.gen_range(0..content.len() - update_size)
+        } else {
+            0
+        };
+        content[offset..offset + update_size].copy_from_slice(&update_content);
+        file_handler.update_file(&format!("{data_slice}"), &update_content, offset);
+
+        println!("data_read {i}");
+        let data_read: Vec<_> = (0..i + 1)
+            .map(|i| file_handler.read_file(&format!("{i}")))
+            .collect();
+        assert_eq!(data_read, all_data);
 
         println!("destroy_devices {i}");
         file_handler.destroy_devices(&failures);

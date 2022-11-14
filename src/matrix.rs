@@ -1,8 +1,8 @@
 use std::fmt::{Debug, Formatter};
 use std::ops::{Index, IndexMut};
 
-use crate::galois::Galois;
 use crate::galois;
+use crate::galois::Galois;
 
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-96-332.pdf
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-03-504.pdf
@@ -57,10 +57,7 @@ impl<const N: usize> Matrix<N, N>
 where
     [(); N + N]:,
 {
-    pub fn gaussian_elimination<const X: usize>(
-        &mut self,
-        vec: &mut [Box<[Galois; X]>; N],
-    ) {
+    pub fn gaussian_elimination<const X: usize>(&mut self, vec: &mut [Box<[Galois; X]>; N]) {
         for m in 0..N {
             // swapp if zero
             if self.data[m][m] == Galois::zero() {
@@ -185,7 +182,11 @@ where
         result
     }
 
-    pub fn mul_vec_at<const X: usize>(&self, vec: &[Box<[Galois; X]>; N], idx: usize) -> Box<[Galois; X]> {
+    pub fn mul_vec_at<const X: usize>(
+        &self,
+        vec: &[Box<[Galois; X]>; N],
+        idx: usize,
+    ) -> Box<[Galois; X]> {
         let mut r = galois::zeros();
         let row = &self.data[idx];
         for (m, v) in row.iter().zip(vec) {

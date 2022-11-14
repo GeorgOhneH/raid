@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::path::PathBuf;
 
-use crate::raid::RAID;
 use crate::galois;
+use crate::raid::RAID;
+use std::io::Write;
 
 #[derive(Debug, Clone)]
 struct FileLocation {
@@ -30,11 +31,10 @@ impl FileLocation {
     }
 }
 
-
 pub struct FileHandler<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>
-    where
-        [(); D * X]:,
-        [(); X * D]:,
+where
+    [(); D * X]:,
+    [(); X * D]:,
 {
     raid: R,
     file_locations: HashMap<String, FileLocation>,
@@ -43,11 +43,10 @@ pub struct FileHandler<R: RAID<D, C, X>, const D: usize, const C: usize, const X
 }
 
 impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandler<R, D, C, X>
-    where
-        [(); D * X]:,
-        [(); X * D]:,
+where
+    [(); D * X]:,
+    [(); X * D]:,
 {
-
     pub fn new(path: PathBuf) -> Self {
         Self {
             raid: R::new(path),
@@ -98,8 +97,7 @@ impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandl
         }
 
         while chunk_idx + D - 1 < chunks.len() {
-            let data: [&[u8; X]; D] =
-                core::array::from_fn(|i| chunks[chunk_idx + i]);
+            let data: [&[u8; X]; D] = core::array::from_fn(|i| chunks[chunk_idx + i]);
             self.raid.add_data(&data, self.current_slice);
             self.current_slice += 1;
             chunk_idx += D;
@@ -133,7 +131,7 @@ impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandl
         assert!(left_bytes < X);
 
         if left_bytes == 0 {
-            return result
+            return result;
         }
 
         result.extend_from_slice(
@@ -144,5 +142,65 @@ impl<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize> FileHandl
         );
 
         result
+    }
+    pub fn update_file(&self, name: &str, content: &[u8], offset: usize) {
+        let mut file_location = self.file_locations.get(name).unwrap().clone();
+        assert!(file_location.length >= content.len() + offset);
+
+        let mut visited_bytes = 0;
+        while visited_bytes < file_location.length {
+            if visited_bytes < offset && visited_bytes + X > offset {
+                if visited_bytes + X < content.len() + offset {
+                    let mut data = self
+                        .raid
+                        .read_data_at(file_location.start_slice, file_location.start_data_idx);
+                    let idx = offset - visited_bytes;
+                    let size = visited_bytes + X - offset;
+
+                    data[idx..].clone_from_slice(&content[..size]);
+                    self.raid.update_data(
+                        &data,
+                        file_location.start_slice,
+                        file_location.start_data_idx,
+                    );
+                } else {
+                    let mut data = self
+                        .raid
+                        .read_data_at(file_location.start_slice, file_location.start_data_idx);
+                    let idx = offset - visited_bytes;
+                    let size = content.len();
+                    data[idx..idx + size].clone_from_slice(content);
+                    self.raid.update_data(
+                        &data,
+                        file_location.start_slice,
+                        file_location.start_data_idx,
+                    );
+                    return;
+                }
+            } else if visited_bytes >= offset && visited_bytes + X > offset + content.len() {
+                let mut data = self
+                    .raid
+                    .read_data_at(file_location.start_slice, file_location.start_data_idx);
+                let idx = visited_bytes - offset;
+                let size = offset + content.len() - visited_bytes;
+                data[..size].clone_from_slice(&content[idx..]);
+                self.raid.update_data(
+                    &data,
+                    file_location.start_slice,
+                    file_location.start_data_idx,
+                );
+                return;
+            } else if visited_bytes >= offset && visited_bytes + X <= offset + content.len() {
+                let idx = visited_bytes - offset;
+                let data: &[u8; X] = (&content[idx..idx + X]).try_into().unwrap();
+                self.raid.update_data(
+                    data,
+                    file_location.start_slice,
+                    file_location.start_data_idx,
+                );
+            }
+            file_location.increment_data_idx::<D>();
+            visited_bytes += X;
+        }
     }
 }

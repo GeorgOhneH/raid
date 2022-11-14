@@ -25,8 +25,8 @@ pub mod single;
 fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
     num_data_slices: usize,
 ) where
-    [();  X * D ]:,
-    [();  D * X ]:,
+    [(); X * D]:,
+    [(); D * X]:,
 {
     let mut rng = rand::thread_rng();
     // "C:\\scripts\\rust\\raid\\fuzzfile"

@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-
 pub trait RAID<const D: usize, const C: usize, const X: usize>: Sized {
     fn new(root_path: PathBuf) -> Self;
     fn add_data(&mut self, data: &[&[u8; X]; D], data_slice: usize);
