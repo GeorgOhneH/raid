@@ -6,7 +6,7 @@ use crate::galois::Galois;
 
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-96-332.pdf
 // http://web.eecs.utk.edu/~jplank/plank/papers/CS-03-504.pdf
-
+/// Simply implementation of linear algebra things  
 #[derive(Clone)]
 pub struct Matrix<const M: usize, const N: usize>
 where
@@ -74,7 +74,8 @@ where
                 println!("{:?}", self);
                 panic!("Singular matrix")
             }
-
+            
+            // scale row
             if self.data[m][m] != Galois::one() {
                 let scale = Galois::one() / self.data[m][m];
                 for i in 0..N {
@@ -84,7 +85,8 @@ where
                     vec[m][x_idx] *= scale;
                 }
             }
-
+            
+            // subract row to lower one
             for m_below in m + 1..N {
                 if self.data[m_below][m] != Galois::zero() {
                     let scale = self.data[m_below][m];
@@ -98,6 +100,7 @@ where
             }
         }
 
+        // calculate final output
         for m in (0..N - 1).rev() {
             for c in m + 1..N {
                 for x_idx in 0..X {
@@ -113,43 +116,45 @@ where
     [(); M + N]:,
     [(); N + N]:,
 {
+    /// implementation of http://web.eecs.utk.edu/~jplank/plank/papers/CS-03-504.pdf
     pub fn reed_solomon() -> Self {
-        let mut vandermonde: [[Galois; N]; M + N] =
+        let mut reed: [[Galois; N]; M + N] =
             core::array::from_fn(|m| core::array::from_fn(|n| Galois::new((m) as u8).pow(n)));
 
         for idx_n in 0..N {
-            if vandermonde[idx_n][idx_n] == Galois::zero() {
+            if reed[idx_n][idx_n] == Galois::zero() {
                 for below_n in idx_n + 1..N + M {
-                    if vandermonde[below_n][idx_n] != Galois::zero() {
-                        vandermonde.swap(below_n, idx_n)
+                    if reed[below_n][idx_n] != Galois::zero() {
+                        reed.swap(below_n, idx_n)
                     }
                 }
             }
 
-            if vandermonde[idx_n][idx_n] == Galois::zero() {
+            if reed[idx_n][idx_n] == Galois::zero() {
                 panic!("should never be possible with a vandermonde matrix")
             }
 
-            if vandermonde[idx_n][idx_n] != Galois::one() {
-                let scale = Galois::one() / vandermonde[idx_n][idx_n];
+            if reed[idx_n][idx_n] != Galois::one() {
+                let scale = Galois::one() / reed[idx_n][idx_n];
                 for r in 0..N + M {
-                    vandermonde[r][idx_n] *= scale
+                    reed[r][idx_n] *= scale
                 }
             }
 
             for c in (0..idx_n).chain(idx_n + 1..N) {
-                let scale = vandermonde[idx_n][c];
+                let scale = reed[idx_n][c];
                 for r in 0..N + M {
-                    vandermonde[r][c] -= scale * vandermonde[r][idx_n]
+                    reed[r][c] -= scale * reed[r][idx_n]
                 }
             }
         }
 
-        let data = core::array::from_fn(|i| vandermonde[i + N]);
+        let data = core::array::from_fn(|i| reed[i + N]);
 
         Self { data }
     }
 
+    /// construct matrix with know chunk valuess
     pub fn recovery_matrix(&self, ds: Vec<usize>, cs: Vec<usize>) -> Matrix<N, N> {
         assert_eq!(ds.len() + cs.len(), N);
 
@@ -170,6 +175,7 @@ where
         Matrix::<N, N> { data }
     }
 
+    /// normal matrix vector multiplication 
     pub fn mul_vec<const X: usize>(&self, vec: &[&[Galois; X]; N]) -> [Box<[Galois; X]>; M] {
         let mut result = core::array::from_fn(|_| galois::zeros());
         for (r, row) in result.iter_mut().zip(&self.data) {
@@ -182,6 +188,7 @@ where
         result
     }
 
+    /// normal matrix vector multiplication for one index
     pub fn mul_vec_at<const X: usize>(
         &self,
         vec: &[Box<[Galois; X]>; N],

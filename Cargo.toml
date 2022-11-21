@@ -12,6 +12,7 @@ oneshot = "0.1.5"
 
 [dev-dependencies]
 criterion = "0.3"
+seq-macro = "0.3"
 
 
 [[bin]]

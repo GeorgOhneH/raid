@@ -55,6 +55,11 @@ where
             current_data_idx: 0,
         }
     }
+
+    pub fn number_of_data_chunks_used(&self) -> usize {
+        self.current_slice*D + self.current_data_idx
+    }
+
     pub fn destroy_devices(&self, dev_idxs: &[usize]) {
         self.raid.destroy_devices(dev_idxs)
     }
@@ -95,7 +100,6 @@ where
             self.increment_data_idx();
             chunk_idx += 1;
         }
-
         while chunk_idx + D - 1 < chunks.len() {
             let data: [&[u8; X]; D] = core::array::from_fn(|i| chunks[chunk_idx + i]);
             self.raid.add_data(&data, self.current_slice);
@@ -202,5 +206,9 @@ where
             file_location.increment_data_idx::<D>();
             visited_bytes += X;
         }
+    }
+
+    pub fn ping(&self) {
+        self.raid.ping()
     }
 }

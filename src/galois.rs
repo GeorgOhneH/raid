@@ -7,7 +7,7 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 
 include!(concat!(env!("OUT_DIR"), "/table.rs"));
 
-/// The field GF(2^8).
+/// Transparent u8 type uses the field GF(2^8).
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Galois(u8);
@@ -28,16 +28,19 @@ impl Galois {
     }
 }
 
+/// init zero chunk on heap
 pub fn zeros<const X: usize>() -> Box<[Galois; X]> {
     let zero = Box::new_zeroed();
     unsafe { zero.assume_init() }
 }
 
+/// init zero chunk on heap
 pub fn zeros_raw<const X: usize>() -> Box<[u8; X]> {
     let zero = Box::new_zeroed();
     unsafe { zero.assume_init() }
 }
 
+/// init chunk on heap
 pub fn from_fn<const X: usize, F>(mut cb: F) -> Box<[Galois; X]>
 where
     F: FnMut(usize) -> Galois,
@@ -49,6 +52,7 @@ where
     unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
 }
 
+/// init chunk on heap
 pub fn from_fn_raw<const X: usize, F>(mut cb: F) -> Box<[u8; X]>
 where
     F: FnMut(usize) -> u8,
@@ -60,6 +64,7 @@ where
     unsafe { mem::transmute::<_, Box<[u8; X]>>(data) }
 }
 
+/// init chunk on heap
 pub fn from_slice<const X: usize>(slice: &[Galois; X]) -> Box<[Galois; X]> {
     let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
     for (i, elem) in (&mut data[..]).iter_mut().enumerate() {
@@ -68,6 +73,7 @@ pub fn from_slice<const X: usize>(slice: &[Galois; X]) -> Box<[Galois; X]> {
     unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
 }
 
+/// init chunk on heap
 pub fn from_slice_raw<const X: usize>(slice: &[u8; X]) -> Box<[Galois; X]> {
     let mut data: Box<[MaybeUninit<Galois>; X]> = unsafe { Box::new_uninit().assume_init() };
     for (i, elem) in (&mut data[..]).iter_mut().enumerate() {
@@ -76,18 +82,22 @@ pub fn from_slice_raw<const X: usize>(slice: &[u8; X]) -> Box<[Galois; X]> {
     unsafe { mem::transmute::<_, Box<[Galois; X]>>(data) }
 }
 
+/// transmute from u8 to Galois
 pub fn from_bytes<const X: usize>(bytes: Box<[u8; X]>) -> Box<[Galois; X]> {
     unsafe { core::mem::transmute(bytes) }
 }
 
+/// transmute from u8 to Galois
 pub fn from_bytes_ref<const X: usize>(bytes: &[u8; X]) -> &[Galois; X] {
     unsafe { core::mem::transmute(bytes) }
 }
 
+/// transmute from Galoise to u8
 pub fn as_bytes<const X: usize>(galois_slice: Box<[Galois; X]>) -> Box<[u8; X]> {
     unsafe { core::mem::transmute(galois_slice) }
 }
 
+/// transmute from Galoise to u8
 pub fn as_bytes_ref<const X: usize>(galois_slice: &[Galois; X]) -> &[u8; X] {
     unsafe { core::mem::transmute(galois_slice) }
 }

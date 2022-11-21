@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
-use crossbeam_channel::{unbounded, Receiver, SendError, Sender};
+use crossbeam_channel::{bounded, unbounded, Receiver, SendError, Sender};
 
 use crate::galois;
 use crate::galois::Galois;
@@ -34,45 +34,58 @@ pub struct HeadNodeMsg<const X: usize> {
 
 #[derive(Debug)]
 pub enum Msg<const X: usize> {
+    // New chunk for the whole slice
     NewData {
         data_slice: usize,
         data: Box<[Galois; X]>,
     },
+    // New chunk only for this device
     NewDataAt {
         data_slice: usize,
         data: Box<[Galois; X]>,
     },
+    // New checksum for the whole slice
     NewDataChecksum {
         data_slice: usize,
         data: Box<[Galois; X]>,
         dev_idx: usize,
     },
+    // New checksum only for this device
     NewDataChecksumAt {
         data_slice: usize,
         data: Box<[Galois; X]>,
         dev_idx: usize,
     },
+    // update chunk
     UpdateData {
         data_slice: usize,
         data: Box<[Galois; X]>,
     },
+    // request to update checksum
     UpdateDataChecksum {
         data_slice: usize,
         diff: Box<[Galois; X]>,
         dev_idx: usize,
     },
+    // request for chunk for data recovery
     NeedRecover {
         data_slice: usize,
         dev_idx: usize,
     },
+    // head node request chunk. For the read operation
     HeadNodeDataRequest {
         data_slice: usize,
         oneshot_send: oneshot::Sender<HeadNodeMsg<X>>,
     },
+    // simulate the loss of a device
     DestroyStorage {
         max_data_slice: usize,
+    },
+    // used to see when the thread has finished 
+    Ping {
         oneshot_send: oneshot::Sender<()>,
     },
+    // Shutdown
     Shutdown,
 }
 
@@ -256,7 +269,6 @@ where
 
                     let current_status = self.current_checksum.get(&data_slice);
 
-                    let zero = galois::zeros::<X>();
                     let new_status = if let Some(status) = current_status {
                         let new_checksum = galois::from_fn(|i| {
                             status.current_checksum[i]
@@ -343,14 +355,10 @@ where
                     };
                     fs::write(&checksum_path, galois::as_bytes_ref(&new_checksum)).unwrap();
                 }
-                Msg::DestroyStorage {
-                    max_data_slice,
-                    oneshot_send,
-                } => {
+                Msg::DestroyStorage { max_data_slice } => {
                     let _ = std::fs::remove_dir_all(&self.path);
                     create_dir(&self.path).unwrap();
                     self.recover(&recover_rec, max_data_slice)?;
-                    oneshot_send.send(()).unwrap();
                 }
                 Msg::NeedRecover {
                     data_slice,
@@ -383,6 +391,9 @@ where
                 } => {
                     let data = self.read_data(data_slice);
                     oneshot_rec.send(HeadNodeMsg { data_slice, data }).unwrap();
+                }
+                Msg::Ping { oneshot_send } => {
+                    oneshot_send.send(()).unwrap();
                 }
                 Msg::Shutdown => {
                     return Ok(());
@@ -588,15 +599,24 @@ where
     }
 
     fn destroy_devices(&self, dev_idxs: &[usize]) {
-        let mut txs = vec![];
         for dev_idx in dev_idxs {
-            let (rt, tx) = oneshot::channel();
-            txs.push(tx);
             self.coms[*dev_idx]
                 .send(Msg::DestroyStorage {
-                    oneshot_send: rt,
                     max_data_slice: self.max_data_slices,
                 })
+                .unwrap()
+        }
+    }
+
+    // wait for every thread to finish. Used for the benchmarks
+    fn ping(&self) {
+        let mut txs = vec![];
+
+        for dev_idx in 0..D + C {
+            let (rt, tx) = oneshot::channel();
+            txs.push(tx);
+            self.coms[dev_idx]
+                .send(Msg::Ping { oneshot_send: rt })
                 .unwrap()
         }
         for tx in txs {

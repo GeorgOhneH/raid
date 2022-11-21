@@ -9,17 +9,21 @@ use std::path::PathBuf;
 use rand::SeedableRng;
 use rand::{Rng, RngCore};
 
-use raid::distributed::HeadNode;
 use raid::file::FileHandler;
 use raid::galois;
+use raid::raid::distributed::HeadNode;
+use raid::raid::single::SingleServer;
 use raid::raid::RAID;
-use raid::single::SingleServer;
 
 // echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 fn main() {
-    const X: usize = 2usize.pow(22); // 4MB
+    const X: usize = 2usize.pow(20); // 4MB
+    
+    fuzz_test::<SingleServer<30, 2, X>, 30, 2, X>(20);
+    fuzz_test::<HeadNode<30, 2, X>, 30, 2, X>(20);
 
-    fuzz_file_test::<SingleServer<3, 4, X>, 3, 4, X>(100);
+    fuzz_file_test::<SingleServer<30, 2, X>, 30, 2, X>(20);
+    fuzz_file_test::<HeadNode<30, 2, X>, 30, 2, X>(20);
 }
 
 fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
@@ -36,7 +40,7 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
 
     for i in 0..num_data_slices {
         println!("Fuzz File Round {i}");
-        let length = rng.gen_range(1..X * D * 3);
+        let length = rng.gen_range(2*X..X * 10);
         let mut content = vec![0u8; length];
         rng.fill_bytes(&mut content);
         println!("add_file {i}");
@@ -49,7 +53,8 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
             .collect();
         assert_eq!(data_read, all_data);
 
-        let number_of_failures: usize = rng.gen_range(0..C);
+        //let number_of_failures: usize = rng.gen_range(0..C);
+        let number_of_failures: usize = 2;
         let mut failures = vec![];
         while failures.len() < number_of_failures {
             let failure: usize = rng.gen_range(0..C + D);

@@ -3,6 +3,7 @@ use std::fs::create_dir;
 use std::io;
 use std::path::PathBuf;
 use std::prelude::rust_2021::TryInto;
+use std::time::Instant;
 
 use crate::galois;
 use crate::galois::Galois;
@@ -17,7 +18,7 @@ where
     [(); D + D]:,
 {
     max_data_slices: usize,
-    vandermonde: Matrix<C, D>,
+    reed: Matrix<C, D>,
     paths: [PathBuf; C + D],
 }
 
@@ -73,6 +74,7 @@ where
     pub fn construct_missing_devices(&self) {
         let mut online_devices: [bool; D + C] = [false; D + C];
         let mut count = 0;
+        // check which devices are online
         for i in 0..D + C {
             if self.paths[i].exists() {
                 online_devices[i] = true;
@@ -86,8 +88,8 @@ where
             panic!("Too man devices lost")
         }
 
+        // use only D devices
         let mut recover_devices = online_devices;
-
         let mut x = D + C - 1;
         while count > D {
             if recover_devices[x] {
@@ -100,6 +102,7 @@ where
         assert_eq!(count, D);
 
         for data_slice in 0..self.max_data_slices + 1 {
+            // collect data we need
             let mut r_data_check = vec![];
             let mut r_data_idx = vec![];
             for data_idx in 0..D {
@@ -121,11 +124,13 @@ where
                     r_check_idx.push(check_idx);
                 }
             }
-
-            let mut rec_matrix = self.vandermonde.recovery_matrix(r_data_idx, r_check_idx);
+            
+            // consturct matrix
+            let mut rec_matrix = self.reed.recovery_matrix(r_data_idx, r_check_idx);
             let mut data: [Box<[Galois; X]>; D] = r_data_check.try_into().unwrap();
             rec_matrix.gaussian_elimination(&mut data);
-
+            
+            // save data
             for data_idx in 0..D {
                 let folder_id_i = Self::folder_id(data_slice, data_idx);
                 if !online_devices[folder_id_i] {
@@ -133,11 +138,12 @@ where
                     fs::write(file_path, galois::as_bytes_ref(&data[data_idx])).unwrap();
                 }
             }
+            // coompute checksum and save
             for check_idx in 0..C {
                 let folder_id_i = Self::folder_id(data_slice, check_idx + D);
                 if !online_devices[folder_id_i] {
                     let file_path = self.checksum_file(data_slice, check_idx);
-                    let checksum = self.vandermonde.mul_vec_at(&data, check_idx);
+                    let checksum = self.reed.mul_vec_at(&data, check_idx);
                     fs::write(file_path, galois::as_bytes_ref(&checksum)).unwrap();
                 }
             }
@@ -161,7 +167,7 @@ where
 
         Self {
             max_data_slices: 0,
-            vandermonde: Matrix::<C, D>::reed_solomon(),
+            reed: Matrix::<C, D>::reed_solomon(),
             paths,
         }
     }
@@ -169,8 +175,7 @@ where
     fn add_data(&mut self, data: &[&[u8; X]; D], data_slice: usize) {
         self.max_data_slices = self.max_data_slices.max(data_slice);
         let data: &[&[Galois; X]; D] = unsafe { core::mem::transmute(data) };
-        let checksum = self.vandermonde.mul_vec(data);
-
+        let checksum = self.reed.mul_vec(data);
         for d_idx in 0..D {
             let file_path = self.data_file(data_slice, d_idx);
             fs::write(file_path, galois::as_bytes_ref(&data[d_idx])).unwrap();
@@ -195,14 +200,14 @@ where
                     let old_checksum: Box<[Galois; X]> =
                         galois::from_bytes(file.into_boxed_slice().try_into().unwrap());
                     galois::from_fn(|i| {
-                        old_checksum[i] + self.vandermonde[check_idx][data_idx] * data[i]
+                        old_checksum[i] + self.reed[check_idx][data_idx] * data[i]
                     })
                 }
                 Err(err) => {
                     let io::ErrorKind::NotFound = err.kind() else {
                         panic!("{:?}", err)
                     };
-                    galois::from_fn(|i| self.vandermonde[check_idx][data_idx] * data[i])
+                    galois::from_fn(|i| self.reed[check_idx][data_idx] * data[i])
                 }
             };
             fs::write(&checksum_path, galois::as_bytes_ref(&new_checksum)).unwrap();
@@ -247,7 +252,7 @@ where
         for check_idx in 0..C {
             let old_checksum = galois::from_bytes(self.read_checksum_at(data_slice, check_idx));
             let new_checksum: Box<[Galois; X]> = galois::from_fn(|i| {
-                old_checksum[i] + self.vandermonde[check_idx][data_idx] * (data[i] - old_data[i])
+                old_checksum[i] + self.reed[check_idx][data_idx] * (data[i] - old_data[i])
             });
             let file_path = self.checksum_file(data_slice, check_idx);
             fs::remove_file(&file_path).unwrap();

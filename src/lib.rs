@@ -8,17 +8,17 @@ use std::path::PathBuf;
 
 use rand::{Rng, RngCore};
 
-use crate::distributed::HeadNode;
+use raid::single::SingleServer;
+
 use crate::file::FileHandler;
 use crate::raid::RAID;
-use crate::single::SingleServer;
 
-pub mod distributed;
+use self::raid::distributed::HeadNode;
+
 pub mod file;
 pub mod galois;
 pub mod matrix;
 pub mod raid;
-pub mod single;
 
 // echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 
