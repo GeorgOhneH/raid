@@ -43,6 +43,7 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
 
     for i in 0..num_data_slices {
         println!("Fuzz File Round {i}");
+        // generate file
         let length = rng.gen_range(1..X * 10);
         let mut content = vec![0u8; length];
         rng.fill_bytes(&mut content);
@@ -53,15 +54,7 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
             .collect();
         assert_eq!(data_read, all_data);
 
-        let number_of_failures: usize = rng.gen_range(0..C);
-        let mut failures = vec![];
-        while failures.len() < number_of_failures {
-            let failure: usize = rng.gen_range(0..C + D);
-            if !failures.contains(&failure) {
-                failures.push(failure)
-            }
-        }
-
+        // update file
         let data_slice = rng.gen_range(0..all_data.len());
         let content = &mut all_data[data_slice];
         let update_size = rng.gen_range(1..content.len() + 1);
@@ -80,6 +73,15 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
             .collect();
         assert_eq!(data_read, all_data);
 
+        // destroy disks
+        let number_of_failures: usize = rng.gen_range(0..C);
+        let mut failures = vec![];
+        while failures.len() < number_of_failures {
+            let failure: usize = rng.gen_range(0..C + D);
+            if !failures.contains(&failure) {
+                failures.push(failure)
+            }
+        }
         file_handler.destroy_devices(&failures);
 
         let data_read: Vec<_> = (0..i + 1)
@@ -97,6 +99,7 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("nodes");
     let mut node: R = RAID::new(path);
 
+    // create random data
     let mut data: Vec<_> = (0..num_data_slices)
         .map(|_| {
             let mut data = core::array::from_fn(|_| galois::as_bytes(galois::zeros::<X>()));
@@ -109,11 +112,14 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
 
     for i in 0..num_data_slices {
         println!("Fuzz RAID Round {i}");
+
+        // store data
         node.add_data(unsafe { core::mem::transmute(&data[i]) }, i);
 
         let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
         assert_eq!(&data_read, &data[..i + 1]);
 
+        // destroy disks
         let number_of_failures: usize = rng.gen_range(0..C);
         let mut failures = vec![];
         while failures.len() < number_of_failures {
@@ -122,12 +128,12 @@ fn fuzz_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(
                 failures.push(failure)
             }
         }
-
         node.destroy_devices(&failures);
 
         let data_read: Vec<_> = (0..i + 1).map(|i| node.read_data(i)).collect();
         assert_eq!(&data_read, &data[..i + 1]);
 
+        // update data
         let mut changed_data = galois::as_bytes(galois::zeros::<X>());
         rng.fill_bytes(changed_data.as_mut_slice());
         let data_slice = rng.gen_range(0..i + 1);
