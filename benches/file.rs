@@ -1,6 +1,6 @@
 #![feature(generic_const_exprs)]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkGroup, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion};
 
 use criterion::measurement::Measurement;
 use raid::file::FileHandler;
@@ -8,7 +8,7 @@ use raid::raid::distributed::HeadNode;
 use raid::raid::single::SingleServer;
 use raid::raid::RAID;
 use rand::seq::SliceRandom;
-use rand::{Rng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng};
 use seq_macro::seq;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -17,7 +17,7 @@ const SAMPLE_POINTS: usize = 10;
 
 fn criterion_benches(c: &mut Criterion) {
     const X: usize = usize::pow(2, 20);
-    
+
     criterion_read::<6, 2, X, _>(c.benchmark_group("read"));
     criterion_write::<6, 2, X, _>(c.benchmark_group("write"));
 
@@ -55,12 +55,11 @@ fn criterion_benches(c: &mut Criterion) {
     criterion_write_single::<6, 4, X, _>(c.benchmark_group("cwrite64"));
     criterion_write_single::<6, 5, X, _>(c.benchmark_group("cwrite65"));
     criterion_write_single::<6, 6, X, _>(c.benchmark_group("cwrite66"));
-    
-    
+
     seq!(N in 2..=100 {
         criterion_write_single::<N, 2, X, _>(c.benchmark_group(format!("dwrite_{}_2", N)));
     });
-    
+
     criterion_read_single::<6, 0, X, _>(c.benchmark_group("cread60"));
     criterion_read_single::<6, 1, X, _>(c.benchmark_group("cread61"));
     criterion_read_single::<6, 2, X, _>(c.benchmark_group("cread62"));
@@ -68,16 +67,15 @@ fn criterion_benches(c: &mut Criterion) {
     criterion_read_single::<6, 4, X, _>(c.benchmark_group("cread64"));
     criterion_read_single::<6, 5, X, _>(c.benchmark_group("cread65"));
     criterion_read_single::<6, 6, X, _>(c.benchmark_group("cread66"));
-    
+
     seq!(N in 2..=100 {
         criterion_read_single::<N, 2, X, _>(c.benchmark_group(format!("dread_{}_2", N)));
     });
-    
+
     seq!(N in 2..=60 {
         criterion_recover::<N, 2, X, _>(c.benchmark_group(format!("drecover_{}_2_1", N)), 1);
         criterion_recover::<N, 2, X, _>(c.benchmark_group(format!("drecover_{}_2_2", N)), 2);
     });
-    
 }
 
 fn criterion_read<const D: usize, const C: usize, const X: usize, M: Measurement + 'static>(
@@ -124,12 +122,11 @@ fn criterion_read_single<const D: usize, const C: usize, const X: usize, M: Meas
     [(); C + C]:,
     [(); D + D]:,
 {
-
     group
         .sample_size(100)
         .measurement_time(Duration::from_nanos(1));
     let file_handler = prepare_read::<SingleServer<D, C, X>, D, C, X>();
-    
+
     let length = ((100 * 6 - 1) * X / 2 + X) / (10);
     group.bench_function(format!("single_{length}"), |b| {
         b.iter(|| file_handler.read_file(&format!("{length}")))
@@ -299,11 +296,14 @@ where
         file_handler.add_file(format!("{length}"), &content);
     }
 
-    println!("number_of_data_chunks_used: {}, total_bytes: {}", file_handler.number_of_data_chunks_used(), total_bytes);
+    println!(
+        "number_of_data_chunks_used: {}, total_bytes: {}",
+        file_handler.number_of_data_chunks_used(),
+        total_bytes
+    );
 
     file_handler
 }
-
 
 criterion_group!(benches, criterion_benches);
 criterion_main!(benches);

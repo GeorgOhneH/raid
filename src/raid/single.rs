@@ -3,7 +3,6 @@ use std::fs::create_dir;
 use std::io;
 use std::path::PathBuf;
 use std::prelude::rust_2021::TryInto;
-use std::time::Instant;
 
 use crate::galois;
 use crate::galois::Galois;
@@ -124,12 +123,12 @@ where
                     r_check_idx.push(check_idx);
                 }
             }
-            
+
             // consturct matrix
             let mut rec_matrix = self.reed.recovery_matrix(r_data_idx, r_check_idx);
             let mut data: [Box<[Galois; X]>; D] = r_data_check.try_into().unwrap();
             rec_matrix.gaussian_elimination(&mut data);
-            
+
             // save data
             for data_idx in 0..D {
                 let folder_id_i = Self::folder_id(data_slice, data_idx);
@@ -199,9 +198,7 @@ where
                 Ok(file) => {
                     let old_checksum: Box<[Galois; X]> =
                         galois::from_bytes(file.into_boxed_slice().try_into().unwrap());
-                    galois::from_fn(|i| {
-                        old_checksum[i] + self.reed[check_idx][data_idx] * data[i]
-                    })
+                    galois::from_fn(|i| old_checksum[i] + self.reed[check_idx][data_idx] * data[i])
                 }
                 Err(err) => {
                     let io::ErrorKind::NotFound = err.kind() else {

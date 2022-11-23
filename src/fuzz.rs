@@ -6,7 +6,6 @@
 
 use std::path::PathBuf;
 
-use rand::SeedableRng;
 use rand::{Rng, RngCore};
 
 use raid::file::FileHandler;
@@ -15,10 +14,9 @@ use raid::raid::distributed::HeadNode;
 use raid::raid::single::SingleServer;
 use raid::raid::RAID;
 
-// echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 fn main() {
-    const X: usize = 2usize.pow(20); // 4MB
-    
+    const X: usize = 2usize.pow(20); // 1MB
+
     fuzz_test::<SingleServer<30, 2, X>, 30, 2, X>(20);
     fuzz_test::<HeadNode<30, 2, X>, 30, 2, X>(20);
 
@@ -32,22 +30,18 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
     [(); X * D]:,
     [(); D * X]:,
 {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+    let mut rng = rand::thread_rng();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("nodes");
-    println!("Create FileHandler");
     let mut file_handler: FileHandler<R, D, C, X> = FileHandler::new(path);
     let mut all_data = vec![];
 
     for i in 0..num_data_slices {
         println!("Fuzz File Round {i}");
-        let length = rng.gen_range(2*X..X * 10);
+        let length = rng.gen_range(2 * X..X * 10);
         let mut content = vec![0u8; length];
         rng.fill_bytes(&mut content);
-        println!("add_file {i}");
         file_handler.add_file(format!("{i}"), &content);
-        println!("data_read {i}");
         all_data.push(content);
-        println!("data_read {i}");
         let data_read: Vec<_> = (0..i + 1)
             .map(|i| file_handler.read_file(&format!("{i}")))
             .collect();
@@ -63,7 +57,6 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
             }
         }
 
-        println!("update_data {i}");
         let data_slice = rng.gen_range(0..all_data.len());
         let content = &mut all_data[data_slice];
         let update_size = rng.gen_range(1..content.len() + 1);
@@ -77,16 +70,13 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
         content[offset..offset + update_size].copy_from_slice(&update_content);
         file_handler.update_file(&format!("{data_slice}"), &update_content, offset);
 
-        println!("data_read {i}");
         let data_read: Vec<_> = (0..i + 1)
             .map(|i| file_handler.read_file(&format!("{i}")))
             .collect();
         assert_eq!(data_read, all_data);
 
-        println!("destroy_devices {i}");
         file_handler.destroy_devices(&failures);
 
-        println!("data_read {i}");
         let data_read: Vec<_> = (0..i + 1)
             .map(|i| file_handler.read_file(&format!("{i}")))
             .collect();

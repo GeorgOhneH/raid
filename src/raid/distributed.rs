@@ -6,7 +6,7 @@ use std::io;
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
-use crossbeam_channel::{bounded, unbounded, Receiver, SendError, Sender};
+use crossbeam_channel::{unbounded, Receiver, SendError, Sender};
 
 use crate::galois;
 use crate::galois::Galois;
@@ -81,7 +81,7 @@ pub enum Msg<const X: usize> {
     DestroyStorage {
         max_data_slice: usize,
     },
-    // used to see when the thread has finished 
+    // used to see when the thread has finished
     Ping {
         oneshot_send: oneshot::Sender<()>,
     },
@@ -226,6 +226,7 @@ where
         while let Ok(msg) = rec.recv() {
             match msg {
                 Msg::NewData { data_slice, data } => {
+                    // inform checksum devices
                     for check_idx in 0..C {
                         let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev].send(Msg::NewDataChecksum {
@@ -234,9 +235,11 @@ where
                             dev_idx: self.dev_idx,
                         })?;
                     }
+                    // write data
                     self.write_data(data_slice, &data);
                 }
                 Msg::NewDataAt { data_slice, data } => {
+                    // inform checksum devices
                     for check_idx in 0..C {
                         let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev].send(Msg::NewDataChecksumAt {
@@ -245,11 +248,13 @@ where
                             dev_idx: self.dev_idx,
                         })?;
                     }
+                    // write data
                     self.write_data(data_slice, &data);
                 }
                 Msg::UpdateData { data_slice, data } => {
                     let old_data = self.read_data(data_slice);
                     let diff_data = galois::from_fn(|i| data[i] - old_data[i]);
+                    // inform checksum devices
                     for check_idx in 0..C {
                         let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev].send(Msg::UpdateDataChecksum {
@@ -258,6 +263,7 @@ where
                             dev_idx: self.dev_idx,
                         })?;
                     }
+                    // write data
                     self.write_data(data_slice, &data);
                 }
                 Msg::NewDataChecksum {
@@ -269,7 +275,9 @@ where
 
                     let current_status = self.current_checksum.get(&data_slice);
 
+                    // check if we already received data chunks
                     let new_status = if let Some(status) = current_status {
+                        // update checksum
                         let new_checksum = galois::from_fn(|i| {
                             status.current_checksum[i]
                                 + self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
@@ -280,6 +288,7 @@ where
                             missed_recover_dev_idx: status.missed_recover_dev_idx.clone(),
                         }
                     } else {
+                        // first data chunk
                         let new_checksum = galois::from_fn(|i| {
                             self.vandermonde[self.check_idx(data_slice)][data_idx] * data[i]
                         });
@@ -290,6 +299,7 @@ where
                         }
                     };
                     if new_status.count == D {
+                        // all data chunks received
                         self.current_checksum.remove(&data_slice);
                         self.write_checksum(data_slice, &new_status.current_checksum);
                         for dev_idx in new_status.missed_recover_dev_idx {
@@ -312,12 +322,14 @@ where
                     let self_check_idx = self.check_idx(data_slice);
                     let current_status = self.current_checksum.get_mut(&data_slice);
                     if let Some(current_status) = current_status {
+                        // still waiting for data chunks
                         let new_checksum = galois::from_fn(|i| {
                             current_status.current_checksum[i]
                                 + self.vandermonde[self_check_idx][data_idx] * diff[i]
                         });
                         current_status.current_checksum = new_checksum;
                     } else {
+                        // not waiting for additional data chunks
                         let current_checksum = self.read_checksum(data_slice);
                         let new_checksum = galois::from_fn(|i| {
                             current_checksum[i]
@@ -335,6 +347,7 @@ where
                     let data_idx = Self::data_check_idx(dev_idx, data_slice);
                     let self_check_idx = self.check_idx(data_slice);
                     let checksum_path = self.checksum_file(data_slice);
+                    // update checksum
                     let new_checksum: Box<[Galois; X]> = match fs::read(&checksum_path) {
                         Ok(file) => {
                             let old_checksum: Box<[Galois; X]> =
@@ -348,6 +361,7 @@ where
                             let io::ErrorKind::NotFound = err.kind() else {
                                 panic!("{:?}", err)
                             };
+                            // file not found we assume the current checksum is zero
                             galois::from_fn(|i| {
                                 self.vandermonde[self_check_idx][data_idx] * data[i]
                             })
@@ -374,6 +388,7 @@ where
                             .unwrap();
                     } else if let Some(checksum_status) = self.current_checksum.get_mut(&data_slice)
                     {
+                        // if we still expect data chunks wait until we receive it
                         checksum_status.missed_recover_dev_idx.push(dev_idx);
                     } else {
                         self.recover_coms[dev_idx]
@@ -409,9 +424,11 @@ where
         max_data_slice: usize,
     ) -> Result<()> {
         for current_data_slice in 0..max_data_slice + 1 {
+            // clear old recover responses
             while !recover_rec.is_empty() {
                 recover_rec.recv().unwrap();
             }
+            // ask for data or checksum chunks
             for i in 0..C + D {
                 if i != self.dev_idx {
                     self.coms[i].send(Msg::NeedRecover {
@@ -420,6 +437,8 @@ where
                     })?;
                 }
             }
+
+            // collect data/checksum chunks
             let mut r_data = vec![];
             let mut r_check = vec![];
             let mut r_data_idx = vec![];
@@ -449,9 +468,11 @@ where
                 }
             }
 
+            // make matrix
             r_data.append(&mut r_check);
             let mut rec_matrix = self.vandermonde.recovery_matrix(r_data_idx, r_check_idx);
 
+            // compute data
             let mut rec_data: [Box<[Galois; X]>; D] = r_data.try_into().unwrap();
             rec_matrix.gaussian_elimination(&mut rec_data);
 
@@ -459,6 +480,7 @@ where
             if data_check_idx < D {
                 self.write_data(current_data_slice, &rec_data[data_check_idx])
             } else {
+                // compute checksum
                 let checksum = self.vandermonde.mul_vec_at(&rec_data, data_check_idx - D);
                 self.write_checksum(current_data_slice, &checksum);
             }

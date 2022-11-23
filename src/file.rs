@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use crate::galois;
 use crate::raid::RAID;
-use std::io::Write;
 
 #[derive(Debug, Clone)]
 struct FileLocation {
@@ -57,7 +56,7 @@ where
     }
 
     pub fn number_of_data_chunks_used(&self) -> usize {
-        self.current_slice*D + self.current_data_idx
+        self.current_slice * D + self.current_data_idx
     }
 
     pub fn destroy_devices(&self, dev_idxs: &[usize]) {
@@ -82,6 +81,8 @@ where
         self.file_locations.insert(name, file_location);
         let (chunks, raw_remainder) = content.as_chunks::<X>();
         let mut chunks: Vec<_> = chunks.iter().collect();
+
+        // padd to chunk size with zeros
         let remainder = galois::from_fn_raw(|i| {
             if i < raw_remainder.len() {
                 raw_remainder[i]
@@ -94,12 +95,14 @@ where
         }
         let mut chunk_idx = 0;
 
+        // fill up last slice
         while self.current_data_idx != 0 && chunk_idx < chunks.len() {
             self.raid
                 .add_data_at(chunks[chunk_idx], self.current_slice, self.current_data_idx);
             self.increment_data_idx();
             chunk_idx += 1;
         }
+        // add new slice
         while chunk_idx + D - 1 < chunks.len() {
             let data: [&[u8; X]; D] = core::array::from_fn(|i| chunks[chunk_idx + i]);
             self.raid.add_data(&data, self.current_slice);
@@ -109,7 +112,7 @@ where
         if chunk_idx >= chunks.len() {
             return;
         }
-
+        // start a new slice
         while chunk_idx < chunks.len() {
             self.raid
                 .add_data_at(chunks[chunk_idx], self.current_slice, self.current_data_idx);
@@ -153,6 +156,8 @@ where
 
         let mut visited_bytes = 0;
         while visited_bytes < file_location.length {
+            // We are checking in what way we are overlapping with the chunks.
+            // I recommend to draw some examples then it makes more senese
             if visited_bytes < offset && visited_bytes + X > offset {
                 if visited_bytes + X < content.len() + offset {
                     let mut data = self

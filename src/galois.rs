@@ -202,6 +202,7 @@ macro_rules! forward_ref_binop {
     };
 }
 
+// macro magic implementaing the arithmetic overloading
 add_impl!(Galois);
 sub_impl!(Galois);
 mul_impl!(Galois);
@@ -262,6 +263,7 @@ macro_rules! forward_ref_op_assign {
     };
 }
 
+// macro magic implementaing the arithmetic overloading
 add_assign_impl!(Galois);
 sub_assign_impl!(Galois);
 mul_assign_impl!(Galois);

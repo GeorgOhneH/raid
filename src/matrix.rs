@@ -74,7 +74,7 @@ where
                 println!("{:?}", self);
                 panic!("Singular matrix")
             }
-            
+
             // scale row
             if self.data[m][m] != Galois::one() {
                 let scale = Galois::one() / self.data[m][m];
@@ -85,7 +85,7 @@ where
                     vec[m][x_idx] *= scale;
                 }
             }
-            
+
             // subract row to lower one
             for m_below in m + 1..N {
                 if self.data[m_below][m] != Galois::zero() {
@@ -175,7 +175,7 @@ where
         Matrix::<N, N> { data }
     }
 
-    /// normal matrix vector multiplication 
+    /// normal matrix vector multiplication
     pub fn mul_vec<const X: usize>(&self, vec: &[&[Galois; X]; N]) -> [Box<[Galois; X]>; M] {
         let mut result = core::array::from_fn(|_| galois::zeros());
         for (r, row) in result.iter_mut().zip(&self.data) {
