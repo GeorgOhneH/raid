@@ -4,8 +4,8 @@ use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion};
 
 use criterion::measurement::Measurement;
 use raid::file::FileHandler;
-use raid::raid::distributed::HeadNode;
-use raid::raid::single::SingleServer;
+use raid::raid::distributed::Checkpoint;
+use raid::raid::controller::Controller;
 use raid::raid::RAID;
 use rand::seq::SliceRandom;
 use rand::{RngCore, SeedableRng};
@@ -95,7 +95,7 @@ fn criterion_read<const D: usize, const C: usize, const X: usize, M: Measurement
     group
         .sample_size(100)
         .measurement_time(Duration::from_nanos(1));
-    let file_handler = prepare_read::<SingleServer<D, C, X>, D, C, X>();
+    let file_handler = prepare_read::<Controller<D, C, X>, D, C, X>();
     for length in &lengths {
         group.bench_function(format!("single_{length}"), |b| {
             b.iter(|| file_handler.read_file(&format!("{length}")))
@@ -103,7 +103,7 @@ fn criterion_read<const D: usize, const C: usize, const X: usize, M: Measurement
     }
     file_handler.shutdown();
 
-    let file_handler = prepare_read::<HeadNode<D, C, X>, D, C, X>();
+    let file_handler = prepare_read::<Checkpoint<D, C, X>, D, C, X>();
     for length in &lengths {
         group.bench_function(format!("dist_{length}"), |b| {
             b.iter(|| file_handler.read_file(&format!("{length}")))
@@ -125,7 +125,7 @@ fn criterion_read_single<const D: usize, const C: usize, const X: usize, M: Meas
     group
         .sample_size(100)
         .measurement_time(Duration::from_nanos(1));
-    let file_handler = prepare_read::<SingleServer<D, C, X>, D, C, X>();
+    let file_handler = prepare_read::<Controller<D, C, X>, D, C, X>();
 
     let length = ((100 * 6 - 1) * X / 2 + X) / (10);
     group.bench_function(format!("single_{length}"), |b| {
@@ -133,7 +133,7 @@ fn criterion_read_single<const D: usize, const C: usize, const X: usize, M: Meas
     });
     file_handler.shutdown();
 
-    let file_handler = prepare_read::<HeadNode<D, C, X>, D, C, X>();
+    let file_handler = prepare_read::<Checkpoint<D, C, X>, D, C, X>();
     group.bench_function(format!("dist_{length}"), |b| {
         b.iter(|| file_handler.read_file(&format!("{length}")))
     });
@@ -166,7 +166,7 @@ fn criterion_write<const D: usize, const C: usize, const X: usize, M: Measuremen
 
     files.shuffle(&mut rng);
 
-    let mut file_handler = prepare_read::<SingleServer<D, C, X>, D, C, X>();
+    let mut file_handler = prepare_read::<Controller<D, C, X>, D, C, X>();
     for file in &files {
         group.bench_function(format!("single_{}", file.len()), |b| {
             b.iter(|| {
@@ -177,7 +177,7 @@ fn criterion_write<const D: usize, const C: usize, const X: usize, M: Measuremen
     }
     file_handler.shutdown();
 
-    let mut file_handler = prepare_read::<HeadNode<D, C, X>, D, C, X>();
+    let mut file_handler = prepare_read::<Checkpoint<D, C, X>, D, C, X>();
     for file in &files {
         group.bench_function(format!("dist_{}", file.len()), |b| {
             b.iter(|| {
@@ -215,7 +215,7 @@ fn criterion_write_single<
     let mut file = vec![0u8; length];
     rng.fill_bytes(&mut file);
 
-    let mut file_handler = prepare_read::<SingleServer<D, C, X>, D, C, X>();
+    let mut file_handler = prepare_read::<Controller<D, C, X>, D, C, X>();
     group.bench_function(format!("single_{}", file.len()), |b| {
         b.iter(|| {
             file_handler.add_file("s".to_string(), &file);
@@ -224,7 +224,7 @@ fn criterion_write_single<
     });
     file_handler.shutdown();
 
-    let mut file_handler = prepare_read::<HeadNode<D, C, X>, D, C, X>();
+    let mut file_handler = prepare_read::<Checkpoint<D, C, X>, D, C, X>();
     group.bench_function(format!("dist_{}", file.len()), |b| {
         b.iter(|| {
             file_handler.add_file("s".to_string(), &file);
@@ -251,7 +251,7 @@ fn criterion_recover<const D: usize, const C: usize, const X: usize, M: Measurem
         .measurement_time(Duration::from_nanos(1));
     let failures: Vec<_> = (0..failures).collect();
 
-    let file_handler = prepare_read::<SingleServer<D, C, X>, D, C, X>();
+    let file_handler = prepare_read::<Controller<D, C, X>, D, C, X>();
     group.bench_function("single recover", |b| {
         b.iter(|| {
             file_handler.destroy_devices(&failures);
@@ -259,7 +259,7 @@ fn criterion_recover<const D: usize, const C: usize, const X: usize, M: Measurem
         })
     });
     file_handler.shutdown();
-    let file_handler = prepare_read::<HeadNode<D, C, X>, D, C, X>();
+    let file_handler = prepare_read::<Checkpoint<D, C, X>, D, C, X>();
     group.bench_function("distributed recover", |b| {
         b.iter(|| {
             file_handler.destroy_devices(&failures);

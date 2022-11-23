@@ -10,18 +10,20 @@ use rand::{Rng, RngCore};
 
 use raid::file::FileHandler;
 use raid::galois;
-use raid::raid::distributed::HeadNode;
-use raid::raid::single::SingleServer;
+use raid::raid::distributed::Checkpoint;
+use raid::raid::controller::Controller;
 use raid::raid::RAID;
 
 fn main() {
-    const X: usize = 2usize.pow(20); // 1MB
+    const D: usize = 30; // number of data devices
+    const C: usize = 2; // number of checksum devices
+    const X: usize = 2usize.pow(20); // chunk size
 
-    fuzz_test::<SingleServer<30, 2, X>, 30, 2, X>(20);
-    fuzz_test::<HeadNode<30, 2, X>, 30, 2, X>(20);
+    fuzz_test::<Controller<D, C, X>, D, C, X>(20);
+    fuzz_test::<Checkpoint<D, C, X>, D, C, X>(20);
 
-    fuzz_file_test::<SingleServer<30, 2, X>, 30, 2, X>(20);
-    fuzz_file_test::<HeadNode<30, 2, X>, 30, 2, X>(20);
+    fuzz_file_test::<Controller<D, C, X>, D, C, X>(20);
+    fuzz_file_test::<Checkpoint<D, C, X>, D, C, X>(20);
 }
 
 fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usize>(

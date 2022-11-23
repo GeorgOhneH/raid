@@ -9,7 +9,7 @@ use crate::galois::Galois;
 use crate::matrix::Matrix;
 use crate::raid::RAID;
 
-pub struct SingleServer<const D: usize, const C: usize, const X: usize>
+pub struct Controller<const D: usize, const C: usize, const X: usize>
 where
     [(); C + D]:,
     [(); D + C]:,
@@ -21,7 +21,7 @@ where
     paths: [PathBuf; C + D],
 }
 
-impl<const D: usize, const C: usize, const X: usize> SingleServer<D, C, X>
+impl<const D: usize, const C: usize, const X: usize> Controller<D, C, X>
 where
     [(); C + D]:,
     [(); D + C]:,
@@ -150,7 +150,7 @@ where
     }
 }
 
-impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for SingleServer<D, C, X>
+impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for Controller<D, C, X>
 where
     [(); C + D]:,
     [(); D + C]:,

@@ -27,7 +27,7 @@ impl<T> From<SendError<T>> for Error {
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub struct HeadNodeMsg<const X: usize> {
+pub struct CheckpointMsg<const X: usize> {
     data_slice: usize,
     data: Box<[Galois; X]>,
 }
@@ -75,7 +75,7 @@ pub enum Msg<const X: usize> {
     // head node request chunk. For the read operation
     HeadNodeDataRequest {
         data_slice: usize,
-        oneshot_send: oneshot::Sender<HeadNodeMsg<X>>,
+        oneshot_send: oneshot::Sender<CheckpointMsg<X>>,
     },
     // simulate the loss of a device
     DestroyStorage {
@@ -228,7 +228,7 @@ where
                 Msg::NewData { data_slice, data } => {
                     // inform checksum devices
                     for check_idx in 0..C {
-                        let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
+                        let check_dev = Checkpoint::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev].send(Msg::NewDataChecksum {
                             data_slice,
                             data: data.clone(),
@@ -241,7 +241,7 @@ where
                 Msg::NewDataAt { data_slice, data } => {
                     // inform checksum devices
                     for check_idx in 0..C {
-                        let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
+                        let check_dev = Checkpoint::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev].send(Msg::NewDataChecksumAt {
                             data_slice,
                             data: data.clone(),
@@ -256,7 +256,7 @@ where
                     let diff_data = galois::from_fn(|i| data[i] - old_data[i]);
                     // inform checksum devices
                     for check_idx in 0..C {
-                        let check_dev = HeadNode::<D, C, X>::dev_idx(data_slice, check_idx + D);
+                        let check_dev = Checkpoint::<D, C, X>::dev_idx(data_slice, check_idx + D);
                         self.coms[check_dev].send(Msg::UpdateDataChecksum {
                             data_slice,
                             diff: diff_data.clone(),
@@ -405,7 +405,7 @@ where
                     oneshot_send: oneshot_rec,
                 } => {
                     let data = self.read_data(data_slice);
-                    oneshot_rec.send(HeadNodeMsg { data_slice, data }).unwrap();
+                    oneshot_rec.send(CheckpointMsg { data_slice, data }).unwrap();
                 }
                 Msg::Ping { oneshot_send } => {
                     oneshot_send.send(()).unwrap();
@@ -489,7 +489,7 @@ where
     }
 }
 
-pub struct HeadNode<const D: usize, const C: usize, const X: usize>
+pub struct Checkpoint<const D: usize, const C: usize, const X: usize>
 where
     [(); C + D]:,
     [(); D + C]:,
@@ -501,7 +501,7 @@ where
     handles: [JoinHandle<()>; D + C],
 }
 
-impl<const D: usize, const C: usize, const X: usize> HeadNode<D, C, X>
+impl<const D: usize, const C: usize, const X: usize> Checkpoint<D, C, X>
 where
     [(); C + D]:,
     [(); D + C]:,
@@ -513,7 +513,7 @@ where
     }
 }
 
-impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for HeadNode<D, C, X>
+impl<const D: usize, const C: usize, const X: usize> RAID<D, C, X> for Checkpoint<D, C, X>
 where
     [(); C + D]:,
     [(); D + C]:,
@@ -584,7 +584,7 @@ where
     }
 
     fn read_data(&self, data_slice: usize) -> [Box<[u8; X]>; D] {
-        let receivers: [oneshot::Receiver<HeadNodeMsg<X>>; D] = std::array::from_fn(|i| {
+        let receivers: [oneshot::Receiver<CheckpointMsg<X>>; D] = std::array::from_fn(|i| {
             let dev_idx = Self::dev_idx(data_slice, i);
             let (rt, tx) = oneshot::channel();
             self.coms[dev_idx]

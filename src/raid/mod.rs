@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 pub mod distributed;
-pub mod single;
+pub mod controller;
 
 pub trait RAID<const D: usize, const C: usize, const X: usize>: Sized {
     fn new(root_path: PathBuf) -> Self;
