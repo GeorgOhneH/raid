@@ -12,7 +12,7 @@ you need to change the following lines in the file `src/fuzz.rs`.
 ```rust
 // src/fuzz.rs
 const D: usize = 30; // number of data devices
-const C: usize = 2; // number of checksum devices
+const C: usize = 3; // number of checksum devices
 const X: usize = 2usize.pow(20); // chunk size
 ```  
 

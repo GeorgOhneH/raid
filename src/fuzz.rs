@@ -16,13 +16,17 @@ use raid::raid::RAID;
 
 fn main() {
     const D: usize = 30; // number of data devices
-    const C: usize = 2; // number of checksum devices
+    const C: usize = 3; // number of checksum devices
     const X: usize = 2usize.pow(20); // chunk size
 
+    println!("Controller");
     fuzz_test::<Controller<D, C, X>, D, C, X>(20);
+    println!("Checkpoint");
     fuzz_test::<Checkpoint<D, C, X>, D, C, X>(20);
 
+    println!("Controller");
     fuzz_file_test::<Controller<D, C, X>, D, C, X>(20);
+    println!("Checkpoint");
     fuzz_file_test::<Checkpoint<D, C, X>, D, C, X>(20);
 }
 
@@ -39,7 +43,7 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
 
     for i in 0..num_data_slices {
         println!("Fuzz File Round {i}");
-        let length = rng.gen_range(2 * X..X * 10);
+        let length = rng.gen_range(1..X * 10);
         let mut content = vec![0u8; length];
         rng.fill_bytes(&mut content);
         file_handler.add_file(format!("{i}"), &content);
@@ -49,8 +53,7 @@ fn fuzz_file_test<R: RAID<D, C, X>, const D: usize, const C: usize, const X: usi
             .collect();
         assert_eq!(data_read, all_data);
 
-        //let number_of_failures: usize = rng.gen_range(0..C);
-        let number_of_failures: usize = 2;
+        let number_of_failures: usize = rng.gen_range(0..C);
         let mut failures = vec![];
         while failures.len() < number_of_failures {
             let failure: usize = rng.gen_range(0..C + D);
